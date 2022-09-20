@@ -6,7 +6,6 @@ import random
 import numpy as np
 import pandas as pd
 
-import comet_ml
 import torch
 import pytorch_lightning as pl
 import torchmetrics
@@ -29,18 +28,23 @@ class PersonaRetrievalDataset(torch.utils.data.Dataset):
                 line = json.loads(line)
                 self.data += list(self.get_examples(**line))
 
-    def get_examples(self, person_1, person_2, dialog):
+    def join_same_person(dialog):
+        new_dialog = dialog[:1]
+        for d in dialog[1:]:
+            if new_dialog[-1]["person"] == d["person"]:
+                new_dialog[-1]["text"] = new_dialog[-1]["text"] + " " + d["person"]
+            else:
+                new_dialog.append(d)
+
+    def get_examples(self, persons, dialog):
         for i in range(1, len(dialog)):
             if self.rnd_context:
                 start = random.randint(0, i - 1)
             else:
                 start = 0
-            context = dialog[start:i]
-            candidate = dialog[i]
-            if i % 2 == 0:
-                persona = person_2
-            else:
-                persona = person_1
+            context = [t["text"] for t in dialog[start:i]]
+            candidate = dialog[i]["text"]
+            persona = persons[dialog[i]["person"]]
             label = 1
 
             yield {
@@ -122,7 +126,7 @@ class RetrievalCollator:
 
 
 def aggregate_encoder_output(
-    model_output: transformers.modeling_outputs.BaseModelOutputWithPoolingAndCrossAttentions,
+    model_output,
     mod: str,
 ):
     if mod == "pooler_output":
@@ -183,7 +187,7 @@ class RetrievalModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         context = batch["context"]
         candidate = batch["candidate"]
-        persona = batch["persona"]
+        # persona = batch["persona"]
         b_size = context["input_ids"].size()[0]
         # labels = torch.range(0, candidate['input_ids'].size()[0]-1, dtype=torch.long).to(self.device)
         labels = torch.zeros((b_size, b_size), dtype=torch.long).to(self.device)
@@ -200,13 +204,26 @@ class RetrievalModel(pl.LightningModule):
             .reshape(preds.shape)
         )
         train_metrics = self.train_metrics(preds, targets, indexes=indexes)
-        self.log_dict(train_metrics)
+        self.log_dict(
+            train_metrics, on_epoch=True, on_step=True, batch_size=self.batch_size
+        )
+        self.log(
+            "lr",
+            self.trainer.optimizers[0].param_groups[0]["lr"],
+            on_step=True,
+            prog_bar=True,
+            batch_size=self.batch_size,
+        )
+
         return loss
+
+    def training_epoch_end(self, outputs):
+        self.train_metrics.reset()
 
     def validation_step(self, val_batch, batch_idx):
         context = val_batch["context"]
         candidate = val_batch["candidate"]
-        persona = val_batch["persona"]
+        # persona = val_batch["persona"]
         b_size = context["input_ids"].size()[0]
         labels = torch.zeros((b_size, b_size), dtype=torch.long).to(self.device)
         labels.fill_diagonal_(1)
@@ -221,36 +238,45 @@ class RetrievalModel(pl.LightningModule):
             .reshape(preds.shape)
         )
         val_metrics = self.val_metrics(preds, targets, indexes=indexes)
-        self.log_dict(val_metrics)
+        self.log_dict(
+            val_metrics, on_epoch=True, on_step=False, batch_size=self.batch_size
+        )
 
         return val_metrics, val_loss
+
+    def training_epoch_end(self, outputs):
+        self.val_metrics.reset()
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = transformers.get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=5000, num_training_steps=scheduler_len
+            optimizer, num_warmup_steps=5000, num_training_steps=self.scheduler_len
         )
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
     def forward(self, context, candidat, labels):
         context_vec = self.context_BERT(**context)
         candidat_vec = self.candidat_BERT(**candidat)
-        context_vec = aggregate_encoder_output(context_vec, mod="pooler_output")
-        candidat_vec = aggregate_encoder_output(candidat_vec, mod="pooler_output")
+        context_vec = aggregate_encoder_output(
+            context_vec, mod="last_hidden_state_cls_left"
+        )
+        candidat_vec = aggregate_encoder_output(
+            candidat_vec, mod="last_hidden_state_cls_left"
+        )
         distance = sim_func(context_vec, candidat_vec, "DotProduct")
         return distance
 
 
 epochs = 15
 lr = 7e-5
-batch_size = 15
-context_len = 2
-candidate_len = 2
+batch_size = 64
+context_len = 128
+candidate_len = 64
 persona_len = 2
 val_split = 5
 
-pretrained_path = "/home/posokhov@ad.speechpro.com/projects/models/conversational/"
-data_path = "TlkPersonaChatRus/TolokaPersonaChat_v1.jsonl"
+pretrained_path = "/home/stc/persona/models/rubert-base-cased-conversational"
+data_path = "/home/stc/persona/data/TlkPersonaChatRus/TolokaPersonaChat.jsonl"
 
 tokenizer = transformers.AutoTokenizer.from_pretrained(
     pretrained_path, truncation_side="left", padding_side="right"
@@ -308,4 +334,3 @@ trainer = pl.Trainer(
     num_sanity_val_steps=0,
 )
 trainer.fit(model, train_dataloader, val_dataloader)
-6481

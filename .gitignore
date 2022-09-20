@@ -1,3 +1,6 @@
-TlkPersonaChatRus
+.vscode
+models
+data
 logs
 test.ipynb
+test.py
