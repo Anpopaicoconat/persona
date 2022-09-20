@@ -1,0 +1,16 @@
+{
+    "epochs": 15,
+    "lr": 7e-5,
+    "batch_size": 2,
+    "context_len": 3,
+    "candidate_len": 3,
+    "persona_len": 2,
+    "val_split": 5,
+    "pretrained_path": "/home/posokhov@ad.speechpro.com/projects/models/conversational/",
+    "data_path": "data/TlkPersonaChatRus/TolokaPersonaChat.jsonl",
+    "num_warmup_steps": 5000,
+    "api_key": "sEJsZrYjwc0gxxUAUGQNBwTsb",
+    "save_dir": "logs",
+    "project_name": "bi_encoder",
+    "experiment_name": "nopersona_answers"
+}

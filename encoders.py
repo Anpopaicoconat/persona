@@ -1,17 +1,73 @@
+import os
+import argparse
 import json
-from datetime import datetime
-import re
-import pprint
 import random
-import numpy as np
-import pandas as pd
 
 import torch
 import pytorch_lightning as pl
 import torchmetrics
 import transformers
 
-import os
+parser = argparse.ArgumentParser()
+parser.add_argument("-epochs", help="num of epochs for train", type=int, default=10)
+parser.add_argument("-lr", help="learning rate", type=float, default=1e-5)
+parser.add_argument("-batch_size", help="batch size", type=int, default=64)
+parser.add_argument("-context_len", help="context len", type=int, default=64)
+parser.add_argument("-candidate_len", help="candidate len", type=int, default=64)
+parser.add_argument("-persona_len", help="persona len", type=int, default=64)
+parser.add_argument("-val_split", help="val split", type=int, default=64)
+parser.add_argument(
+    "-truncation_side", help="truncation side", type=str, default="left"
+)
+parser.add_argument("-padding_side", help="padding side", type=str, default="right")
+parser.add_argument("-gradient_clip_val", help="gradient clip val", type=int, default=1)
+parser.add_argument(
+    "-num_warmup_steps", help="num warmup steps", type=int, default=1000
+)
+parser.add_argument(
+    "-pretrained_path",
+    help="pretrained path",
+    type=str,
+    default="/home/posokhov@ad.speechpro.com/projects/models/conversational/",
+)
+parser.add_argument(
+    "-data_path",
+    help="data path",
+    type=str,
+    default="data/TlkPersonaChatRus/TolokaPersonaChat.jsonl",
+)
+parser.add_argument(
+    "-project_name",
+    help="project name",
+    type=str,
+    default="bi-encoder",
+)
+parser.add_argument(
+    "-experiment_name",
+    help="experiment name",
+    type=str,
+    default="test",
+)
+args = parser.parse_args()
+with open("config.json", "r") as read_content:
+    opt = json.load(read_content)
+vars(args).update(opt)
+
+epochs = args.epochs
+lr = args.lr
+batch_size = args.batch_size
+context_len = args.context_len
+candidate_len = args.candidate_len
+persona_len = args.persona_len
+val_split = args.val_split
+truncation_side = args.truncation_side
+padding_side = args.padding_side
+gradient_clip_val = args.gradient_clip_val
+num_warmup_steps = args.num_warmup_steps
+pretrained_path = args.pretrained_path
+data_path = args.data_path
+project_name = args.project_name
+experiment_name = args.experiment_name
 
 os.environ["http_proxy"] = "http://proxy.ad.speechpro.com:3128"
 os.environ["https_proxy"] = "http://proxy.ad.speechpro.com:3128"
@@ -28,15 +84,17 @@ class PersonaRetrievalDataset(torch.utils.data.Dataset):
                 line = json.loads(line)
                 self.data += list(self.get_examples(**line))
 
-    def join_same_person(dialog):
+    def join_same_person(self, dialog):
         new_dialog = dialog[:1]
         for d in dialog[1:]:
             if new_dialog[-1]["person"] == d["person"]:
-                new_dialog[-1]["text"] = new_dialog[-1]["text"] + " " + d["person"]
+                new_dialog[-1]["text"] = new_dialog[-1]["text"] + " " + d["text"]
             else:
                 new_dialog.append(d)
+        return new_dialog
 
     def get_examples(self, persons, dialog):
+        dialog = self.join_same_person(dialog)
         for i in range(1, len(dialog)):
             if self.rnd_context:
                 start = random.randint(0, i - 1)
@@ -267,33 +325,24 @@ class RetrievalModel(pl.LightningModule):
         return distance
 
 
-epochs = 15
-lr = 7e-5
-batch_size = 64
-context_len = 128
-candidate_len = 64
-persona_len = 2
-val_split = 5
-
-pretrained_path = "/home/stc/persona/models/rubert-base-cased-conversational"
-data_path = "/home/stc/persona/data/TlkPersonaChatRus/TolokaPersonaChat.jsonl"
+#########################################################
 
 tokenizer = transformers.AutoTokenizer.from_pretrained(
-    pretrained_path, truncation_side="left", padding_side="right"
+    pretrained_path, truncation_side=truncation_side, padding_side=padding_side
 )
 special_tokens_dict = {
     "additional_special_tokens": [
-        "[P1x]",
-        "[P1x]",
-        "[P2y]",
-        "[P2y]",
+        "[P1m]",
+        "[P1m]",
+        "[P2f]",
+        "[P2f]",
         "[P1u]",
         "[P2u]",
         "[Gk]",
     ]
 }
 tokenizer.add_special_tokens(special_tokens_dict)
-# [P1x] P-turn start, 1-user, 2-model, x-male, y-female, u-unknown
+# [P1x] P-turn start, 1-user, 2-model, m-male, f-female, u-unknown
 context_bert = transformers.AutoModel.from_pretrained(pretrained_path)
 context_bert.resize_token_embeddings(len(tokenizer))
 candidate_bert = transformers.AutoModel.from_pretrained(pretrained_path)
@@ -307,14 +356,13 @@ train_dataset, val_dataset = torch.utils.data.random_split(
 callator = RetrievalCollator(tokenizer, padding="max_length", max_length=context_len)
 
 train_dataloader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=False, collate_fn=callator
+    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=callator
 )
 val_dataloader = torch.utils.data.DataLoader(
     val_dataset, batch_size=batch_size, shuffle=False, collate_fn=callator
 )
 
 scheduler_len = len(train_dataloader) * epochs
-num_warmup_steps = 5000
 
 model = RetrievalModel(
     context_bert, candidate_bert, batch_size, scheduler_len, num_warmup_steps, lr
@@ -322,15 +370,16 @@ model = RetrievalModel(
 logger = pl.loggers.comet.CometLogger(
     api_key="sEJsZrYjwc0gxxUAUGQNBwTsb",
     save_dir="logs",
-    project_name="bi_encoder",
-    experiment_name="nopersona_answers",
+    project_name=project_name,
+    experiment_name=experiment_name,
 )
+logger.log_hyperparams(args)
 trainer = pl.Trainer(
     max_epochs=epochs,
     accelerator="gpu",
     devices=1,
-    gradient_clip_val=1,
+    gradient_clip_val=gradient_clip_val,
     logger=logger,
-    num_sanity_val_steps=0,
+    num_sanity_val_steps=1,
 )
 trainer.fit(model, train_dataloader, val_dataloader)
