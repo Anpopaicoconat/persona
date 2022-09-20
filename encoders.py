@@ -82,18 +82,19 @@ class PersonaRetrievalDataset(torch.utils.data.Dataset):
         with open(path, "r") as file:
             for line in file:
                 line = json.loads(line)
-                self.data += list(self.get_examples(**line))
+                self.data += list(self.get_examples_gk(**line))
 
     def join_same_person(self, dialog):
         new_dialog = dialog[:1]
         for d in dialog[1:]:
             if new_dialog[-1]["person"] == d["person"]:
                 new_dialog[-1]["text"] = new_dialog[-1]["text"] + " " + d["text"]
+                new_dialog[-1]["gk"] = list(set(new_dialog[-1]["gk"]) | set(d["gk"]))
             else:
                 new_dialog.append(d)
         return new_dialog
 
-    def get_examples(self, persons, dialog):
+    def get_examples_candidat(self, persons, dialog):
         dialog = self.join_same_person(dialog)
         for i in range(1, len(dialog)):
             if self.rnd_context:
@@ -111,6 +112,27 @@ class PersonaRetrievalDataset(torch.utils.data.Dataset):
                 "persona": persona,
                 "label": label,
             }
+
+    def get_examples_gk(self, persons, dialog):
+        dialog = self.join_same_person(dialog)
+        for i in range(1, len(dialog)):
+            if self.rnd_context:
+                start = random.randint(0, i - 1)
+            else:
+                start = 0
+            context = [t["text"] for t in dialog[start:i]]
+            candidate = dialog[i]["text"]
+            persona = persons[dialog[i]["person"]]
+            label = 1
+            gks = [p for idx, p in enumerate(persona) if idx in dialog[i]["gk"]]
+            for gk in gks:
+                yield {
+                    "context": context,
+                    # "candidate": candidate,
+                    "gk": gk,
+                    # "persona": persona,
+                    "label": label,
+                }
 
     def __len__(self) -> int:
         return len(self.data)
@@ -137,20 +159,21 @@ class RetrievalCollator:
             for k in example:
                 batch_new[k].append(example[k])
         batch_new["context"] = self.ContextCollator(batch_new["context"])
-        batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
-        batch_new["persona"] = self.PersonaCollator(batch_new["persona"])
+        # batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
+        batch_new["gk"] = self.CandidateCollator(batch_new["gk"])
+        # batch_new["persona"] = self.PersonaCollator(batch_new["persona"])
         return batch_new
 
     def ContextCollator(self, batch):
-        for i, context in enumerate(batch):
+        for b_i, context in enumerate(batch):
             c_out = self.P2
-            for c in context[::-1]:
+            for i, c in enumerate(context[::-1]):
                 if i % 2 == 0:
                     P = self.P1
                 else:
                     P = self.P2
                 c_out = P + c + c_out
-            batch[i] = c_out
+            batch[b_i] = c_out
         return self.tokenizer.batch_encode_plus(
             batch,
             padding=self.padding,
@@ -244,7 +267,7 @@ class RetrievalModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         context = batch["context"]
-        candidate = batch["candidate"]
+        candidate = batch["gk"]
         # persona = batch["persona"]
         b_size = context["input_ids"].size()[0]
         # labels = torch.range(0, candidate['input_ids'].size()[0]-1, dtype=torch.long).to(self.device)
@@ -280,7 +303,7 @@ class RetrievalModel(pl.LightningModule):
 
     def validation_step(self, val_batch, batch_idx):
         context = val_batch["context"]
-        candidate = val_batch["candidate"]
+        candidate = val_batch["gk"]
         # persona = val_batch["persona"]
         b_size = context["input_ids"].size()[0]
         labels = torch.zeros((b_size, b_size), dtype=torch.long).to(self.device)
@@ -316,7 +339,7 @@ class RetrievalModel(pl.LightningModule):
         context_vec = self.context_BERT(**context)
         candidat_vec = self.candidat_BERT(**candidat)
         context_vec = aggregate_encoder_output(
-            context_vec, mod="last_hidden_state_cls_left"
+            context_vec, mod="last_hidden_state_cls_left"  # add arg
         )
         candidat_vec = aggregate_encoder_output(
             candidat_vec, mod="last_hidden_state_cls_left"
@@ -327,59 +350,59 @@ class RetrievalModel(pl.LightningModule):
 
 #########################################################
 
-tokenizer = transformers.AutoTokenizer.from_pretrained(
-    pretrained_path, truncation_side=truncation_side, padding_side=padding_side
-)
-special_tokens_dict = {
-    "additional_special_tokens": [
-        "[P1m]",
-        "[P1m]",
-        "[P2f]",
-        "[P2f]",
-        "[P1u]",
-        "[P2u]",
-        "[Gk]",
-    ]
-}
-tokenizer.add_special_tokens(special_tokens_dict)
-# [P1x] P-turn start, 1-user, 2-model, m-male, f-female, u-unknown
-context_bert = transformers.AutoModel.from_pretrained(pretrained_path)
-context_bert.resize_token_embeddings(len(tokenizer))
-candidate_bert = transformers.AutoModel.from_pretrained(pretrained_path)
-candidate_bert.resize_token_embeddings(len(tokenizer))
+# tokenizer = transformers.AutoTokenizer.from_pretrained(
+#     pretrained_path, truncation_side=truncation_side, padding_side=padding_side
+# )
+# special_tokens_dict = {
+#     "additional_special_tokens": [
+#         "[P1m]",
+#         "[P1m]",
+#         "[P2f]",
+#         "[P2f]",
+#         "[P1u]",
+#         "[P2u]",
+#         "[Gk]",
+#     ]
+# }
+# tokenizer.add_special_tokens(special_tokens_dict)
+# # [P1x] P-turn start, 1-user, 2-model, m-male, f-female, u-unknown
+# context_bert = transformers.AutoModel.from_pretrained(pretrained_path)
+# context_bert.resize_token_embeddings(len(tokenizer))
+# candidate_bert = transformers.AutoModel.from_pretrained(pretrained_path)
+# candidate_bert.resize_token_embeddings(len(tokenizer))
 
-dataset = PersonaRetrievalDataset(data_path)
-train_dataset, val_dataset = torch.utils.data.random_split(
-    dataset, [len(dataset) - (len(dataset) // val_split), (len(dataset) // val_split)]
-)
+# dataset = PersonaRetrievalDataset(data_path)
+# train_dataset, val_dataset = torch.utils.data.random_split(
+#     dataset, [len(dataset) - (len(dataset) // val_split), (len(dataset) // val_split)]
+# )
 
-callator = RetrievalCollator(tokenizer, padding="max_length", max_length=context_len)
+# callator = RetrievalCollator(tokenizer, padding="max_length", max_length=context_len)
 
-train_dataloader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=callator
-)
-val_dataloader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=callator
-)
+# train_dataloader = torch.utils.data.DataLoader(
+#     train_dataset, batch_size=batch_size, shuffle=True, collate_fn=callator
+# )
+# val_dataloader = torch.utils.data.DataLoader(
+#     val_dataset, batch_size=batch_size, shuffle=False, collate_fn=callator
+# )
 
-scheduler_len = len(train_dataloader) * epochs
+# scheduler_len = len(train_dataloader) * epochs
 
-model = RetrievalModel(
-    context_bert, candidate_bert, batch_size, scheduler_len, num_warmup_steps, lr
-)
-logger = pl.loggers.comet.CometLogger(
-    api_key="sEJsZrYjwc0gxxUAUGQNBwTsb",
-    save_dir="logs",
-    project_name=project_name,
-    experiment_name=experiment_name,
-)
-logger.log_hyperparams(args)
-trainer = pl.Trainer(
-    max_epochs=epochs,
-    accelerator="gpu",
-    devices=1,
-    gradient_clip_val=gradient_clip_val,
-    logger=logger,
-    num_sanity_val_steps=1,
-)
-trainer.fit(model, train_dataloader, val_dataloader)
+# model = RetrievalModel(
+#     context_bert, candidate_bert, batch_size, scheduler_len, num_warmup_steps, lr
+# )
+# logger = pl.loggers.comet.CometLogger(
+#     api_key="sEJsZrYjwc0gxxUAUGQNBwTsb",
+#     save_dir="logs",
+#     project_name=project_name,
+#     experiment_name=experiment_name,
+# )
+# logger.log_hyperparams(args)
+# trainer = pl.Trainer(
+#     max_epochs=epochs,
+#     accelerator="gpu",
+#     devices=1,
+#     gradient_clip_val=gradient_clip_val,
+#     logger=logger,
+#     num_sanity_val_steps=1,
+# )
+# trainer.fit(model, train_dataloader, val_dataloader)
