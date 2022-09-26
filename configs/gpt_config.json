@@ -1,0 +1,21 @@
+{
+    "epochs": 1,
+    "lr": 5e-5,
+    "gradient_clip_val": 1,
+    "batch_size": 8,
+    "val_split": 32,
+    "num_warmup_steps": 1500,
+    "truncation_side":"left",
+    "padding": "max_length",
+    "padding_side":"right",
+    "special_tokens_dict": "configs/special_tokens_dict.json",
+    "data_path": "data/TlkPersonaChatRus/TolokaPersonaChat_gk.jsonl",
+    
+    "max_len": 128,
+    "pretrained_gpt": "pretrain_models/rugpt2large",
+
+    "api_key": "sEJsZrYjwc0gxxUAUGQNBwTsb",
+    "save_dir": "logs",
+    "project_name": "gpt_answer",
+    "experiment_name": "gpt generate gk+answer"
+}
