@@ -44,7 +44,7 @@ gpt = transformers.GPT2LMHeadModel.from_pretrained(gpt_args.pretrained_gpt)
 gpt.resize_token_embeddings(len(gpt_tokenizer))
 
 # dataset
-dataset = PersonaDataset(gpt_args.data_path, mod="get_examples_gpt")
+dataset = PersonaDataset(gpt_args.data_path, mod="get_examples_gpt", rnd_context=True)
 
 train_size = len(dataset) - len(dataset) // gpt_args.val_split
 val_size = len(dataset) // gpt_args.val_split
@@ -90,6 +90,15 @@ logger = pl.loggers.comet.CometLogger(
 )
 logger.log_hyperparams(gpt_args)
 
+# checkpoint callback
+checkpoint_callback = pl.callbacks.ModelCheckpoint(
+    monitor="val_loss",
+    dirpath=gpt_args.save_dir,
+    filename="gpt-{epoch:02d}-{val_loss:.2f}",
+    save_top_k=1,
+    mode="min",
+)
+
 # trainer
 trainer = pl.Trainer(
     max_epochs=gpt_args.epochs,
@@ -98,6 +107,7 @@ trainer = pl.Trainer(
     gradient_clip_val=gpt_args.gradient_clip_val,
     logger=logger,
     num_sanity_val_steps=1,
+    callbacks=[checkpoint_callback],
 )
 
 # fit
