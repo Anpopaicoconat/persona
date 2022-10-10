@@ -51,7 +51,8 @@ class RetrievalModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         context = batch["context"]
-        candidate = batch["gk"]
+        candidate = batch["candidate"]
+        # candidate = batch["gk"]
         # persona = batch["persona"]
         b_size = context["input_ids"].size()[0]
         # labels = torch.range(0, candidate['input_ids'].size()[0]-1, dtype=torch.long).to(self.device)
@@ -94,7 +95,8 @@ class RetrievalModel(pl.LightningModule):
 
     def validation_step(self, val_batch, batch_idx):
         context = val_batch["context"]
-        candidate = val_batch["gk"]
+        candidate = val_batch["candidate"]
+        # candidate = val_batch["gk"]
         # persona = val_batch["persona"]
         b_size = context["input_ids"].size()[0]
         labels = torch.zeros((b_size, b_size), dtype=torch.long).to(self.device)
@@ -142,6 +144,16 @@ class RetrievalModel(pl.LightningModule):
         candidat_vec = aggregate_encoder_output(candidat_vec, mod=self.aggregation_mod)
         distance = sim_func(context_vec, candidat_vec, self.sim_mod)
         return distance
+
+    def encode_candidats(self, candidat):
+        candidat_vec = self.candidat_BERT(**candidat)
+        candidat_vec = aggregate_encoder_output(candidat_vec, mod=self.aggregation_mod)
+        return candidat_vec
+
+    def encode_candidats(self, context):
+        context_vec = self.context_BERT(**context)
+        context_vec = aggregate_encoder_output(context_vec, mod=self.aggregation_mod)
+        return context_vec
 
 
 class GenerativeModel(pl.LightningModule):

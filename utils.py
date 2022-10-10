@@ -187,8 +187,8 @@ class RetrievalCollator:
             for k in example:
                 batch_new[k].append(example[k])
         batch_new["context"] = self.ContextCollator(batch_new["context"])
-        # batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
-        batch_new["gk"] = self.CandidateCollator(batch_new["gk"])
+        batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
+        # batch_new["gk"] = self.CandidateCollator(batch_new["gk"])
         # batch_new["persona"] = self.PersonaCollator(batch_new["persona"])
         return batch_new
 
@@ -256,5 +256,5 @@ def sim_func(x, y, mod):
     elif mod == "CosineSimilarity":
         x = x / x.norm(dim=1)[:, None]
         y = y / y.norm(dim=1)[:, None]
-        out = torch.mm(x, y.transpose(0, 1))
+        out = torch.mm(x, y.transpose(0, 1)) * 10
     return out

@@ -16,6 +16,8 @@ from utils import (
 )
 from models import RetrievalModel, GenerativeModel
 
+pl.utilities.seed.seed_everything(42)
+
 os.environ["http_proxy"] = "http://proxy.ad.speechpro.com:3128"
 os.environ["https_proxy"] = "http://proxy.ad.speechpro.com:3128"
 os.environ["ftp_proxy"] = "http://proxy.ad.speechpro.com:3128"
@@ -45,7 +47,9 @@ candidate_bert = transformers.AutoModel.from_pretrained(bert_args.pretrained_ber
 candidate_bert.resize_token_embeddings(len(bert_tokenizer))
 
 # dataset
-dataset = PersonaDataset(bert_args.data_path, mod="get_examples_gk")
+dataset = PersonaDataset(
+    bert_args.data_path, mod="get_examples_gk", rnd_context=bert_args.rnd_context
+)
 train_size = len(dataset) - len(dataset) // bert_args.val_split
 val_size = len(dataset) // bert_args.val_split
 vars(bert_args).update({"train_size": train_size, "val_size": val_size})

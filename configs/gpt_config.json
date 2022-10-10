@@ -10,6 +10,7 @@
     "padding_side":"right",
     "special_tokens_dict": "configs/special_tokens_dict.json",
     "data_path": "data/TlkPersonaChatRus/TolokaPersonaChat_gk.jsonl",
+    "rnd_context": 0,
     
     "max_len": 128,
     "pretrained_gpt": "pretrain_models/rugpt2large",

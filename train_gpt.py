@@ -16,6 +16,8 @@ from utils import (
 )
 from models import RetrievalModel, GenerativeModel
 
+pl.utilities.seed.seed_everything(42)
+
 os.environ["http_proxy"] = "http://proxy.ad.speechpro.com:3128"
 os.environ["https_proxy"] = "http://proxy.ad.speechpro.com:3128"
 os.environ["ftp_proxy"] = "http://proxy.ad.speechpro.com:3128"
@@ -44,7 +46,9 @@ gpt = transformers.GPT2LMHeadModel.from_pretrained(gpt_args.pretrained_gpt)
 gpt.resize_token_embeddings(len(gpt_tokenizer))
 
 # dataset
-dataset = PersonaDataset(gpt_args.data_path, mod="get_examples_gpt", rnd_context=True)
+dataset = PersonaDataset(
+    gpt_args.data_path, mod="get_examples_gpt", rnd_context=gpt_args.rnd_context
+)
 
 train_size = len(dataset) - len(dataset) // gpt_args.val_split
 val_size = len(dataset) // gpt_args.val_split
