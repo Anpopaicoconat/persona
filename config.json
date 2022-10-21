@@ -20,5 +20,5 @@
     "bert": "../pretrain_models/rubert-base-cased-conversational",
     "gpt": "../pretrain_models/rugpt2large",
 
-    "telegram_token": "5330579133:AAGfO3lGtzLP-xKd3uJw_myqaqTfV6Hw1ac"
+    "telegram_token": ""
 }
