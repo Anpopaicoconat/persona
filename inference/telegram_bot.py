@@ -196,7 +196,7 @@ if __name__ == "__main__":
     # bot
     application = (
         Application.builder()
-        .token("5330579133:AAGfO3lGtzLP-xKd3uJw_myqaqTfV6Hw1ac")
+        .token("")
         .build()
     )
 
