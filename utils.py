@@ -170,7 +170,14 @@ class GenerativeCollator:
 
 
 class RetrievalCollator:
-    def __init__(self, tokenizer, padding, max_length, return_tensors="pt"):
+    def __init__(
+        self,
+        tokenizer,
+        padding,
+        max_length_context,
+        max_length_candidate,
+        return_tensors="pt",
+    ):
         self.tokenizer = tokenizer
         self.P1 = "[P1u]"
         self.P2 = "[P2u]"
@@ -178,7 +185,8 @@ class RetrievalCollator:
         self.cls = tokenizer.cls_token
         self.eos = tokenizer.eos_token
         self.padding = padding
-        self.max_length = max_length
+        self.max_length_context = max_length_context
+        self.max_length_candidate = max_length_candidate
         self.return_tensors = return_tensors
 
     def __call__(self, batch):
@@ -187,8 +195,8 @@ class RetrievalCollator:
             for k in example:
                 batch_new[k].append(example[k])
         batch_new["context"] = self.ContextCollator(batch_new["context"])
-        batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
-        # batch_new["gk"] = self.CandidateCollator(batch_new["gk"])
+        # batch_new["candidate"] = self.CandidateCollator(batch_new["candidate"])
+        batch_new["gk"] = self.CandidateCollator(batch_new["gk"])
         # batch_new["persona"] = self.PersonaCollator(batch_new["persona"])
         return batch_new
 
@@ -205,7 +213,7 @@ class RetrievalCollator:
         return self.tokenizer.batch_encode_plus(
             batch,
             padding=self.padding,
-            max_length=self.max_length,
+            max_length=self.max_length_context,
             return_tensors=self.return_tensors,
             truncation=True,
         )
@@ -214,7 +222,7 @@ class RetrievalCollator:
         return self.tokenizer.batch_encode_plus(
             batch,
             padding=self.padding,
-            max_length=self.max_length,
+            max_length=self.max_length_candidate,
             return_tensors=self.return_tensors,
             truncation=True,
         )
@@ -228,7 +236,7 @@ class RetrievalCollator:
         return self.tokenizer.batch_encode_plus(
             batch,
             padding=self.padding,
-            max_length=self.max_length,
+            max_length=self.max_length_candidate,
             return_tensors=self.return_tensors,
             truncation=True,
         )
