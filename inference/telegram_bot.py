@@ -377,11 +377,7 @@ if __name__ == "__main__":
     )
 
     # bot
-    application = (
-        Application.builder()
-        .token("5330579133:AAHLN46Kqp-Vl8Gz8j-dvHbRpKL_NwtjKQ4")
-        .build()
-    )
+    application = Application.builder().token("").build()
 
     rank_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), msg_handler)
 
