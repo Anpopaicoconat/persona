@@ -20,7 +20,7 @@ class BiEncoder_GPT:
         self.retrieval_model = retrieval_model
         self.generative_model = generative_model
 
-    def calculate_candidats(self, candidats_texts: list[str]) -> torch.Tensor:
+    def calculate_candidats(self, candidats_texts) -> torch.Tensor:
         """расчитывает векторную базу кандидатов
 
         Args:
@@ -36,9 +36,11 @@ class BiEncoder_GPT:
 
     def retrieve_gk(
         self,
-        context_texts: list(str),
-        candidats_vecs: list(torch.Tensor),
-    ) -> list(str):
+        context_texts,
+        candidats_vecs,
+        top_k=3,
+        th=0,
+    ):
         """находит релевантные контексту кандидатов
 
         Args:
@@ -56,13 +58,11 @@ class BiEncoder_GPT:
         candidats_vecs = torch.tensor(candidats_vecs)
         context_vec = context_vec.repeat(candidats_vecs.size()[0], 1)
         distances = self.retrieval_model.compute_sim(context_vec, candidats_vecs)[0]
-        candidats = distances * (distances > 0)
-        candidats = torch.topk(candidats, 3).indices
+        candidats = distances * (distances > th)
+        candidats = torch.topk(candidats, top_k).indices
         return candidats.tolist(), distances.tolist()
 
-    def generate_reply(
-        self, context_texts: list[tuple(str, str)], gks: list(str)
-    ) -> tuple:
+    def generate_reply(self, context_texts, gks) -> tuple:
         """генерирует ответ модели
 
         Args:
