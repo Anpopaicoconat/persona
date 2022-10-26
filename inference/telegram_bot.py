@@ -76,7 +76,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data["history"] = []
     context.chat_data["persona_texts"] = []
     context.chat_data["persona_vecs"] = []
-    set_smpl(update, context)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="все начинается с чистого листа!",
@@ -176,7 +175,6 @@ async def add_persona(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def smpl_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     context.chat_data["history"].append(("user", update.message.text))
     relevant_gk_idx, distances = model.retrieve_gk(
         context.chat_data["history"],
@@ -203,19 +201,20 @@ def smpl_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def save_answers(update, context):
+    # TODO: бывает что сохраняет 2 раза ответ модели, изза этого сбивается разметка и юзер становится 1 а модель 0
     metric = context.chat_data.get("metric", False)
-    if metric:
-        dialog_id = context.chat_data.get("dialog_id", None)
-        id = insert_document(
-            collection=DIALOG_TABLE,
-            dialog_id=dialog_id,
-            user_id=update.effective_chat.id,
-            history=context.chat_data["history"],
-            persona_ranks=context.chat_data["persona_ranks"],
-            metric=metric,
-            persona_texts=context.chat_data["persona_texts"],
-        )
-        return id
+    print(metric)
+    dialog_id = context.chat_data.get("dialog_id", None)
+    id = insert_document(
+        collection=DIALOG_TABLE,
+        dialog_id=dialog_id,
+        user_id=update.effective_chat.id,
+        history=context.chat_data["history"],
+        persona_ranks=context.chat_data["persona_ranks"],
+        metric=metric,
+        persona_texts=context.chat_data["persona_texts"],
+    )
+    return id
 
 
 async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,17 +231,26 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     elif context.chat_data["mod"] == "val":
         # сохраняем предыдущий ответ
-        dialog_id = save_answers(update, context)
-        context.chat_data["dialog_id"] = dialog_id
+        try:
+            dialog_id = save_answers(update, context)
+            context.chat_data["dialog_id"] = dialog_id
+        except:
+            print("!не сохранилось!")
         context.chat_data["history"].append(("user", update.message.text))
 
         # retrieve
-        relevant_gk_idx, distances = model.retrieve_gk(
-            context.chat_data["history"],
-            context.chat_data["persona_vecs"],
-            top_k=10,
-            th=-1,
-        )
+        try:
+            relevant_gk_idx, distances = model.retrieve_gk(
+                context.chat_data["history"],
+                context.chat_data["persona_vecs"],
+                top_k=10,
+                th=-1,
+            )
+        except:  # если не установили персону
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id, text="укажите персону /persona"
+            )
+
         context.chat_data["persona_ranks_all"] = relevant_gk_idx
         context.chat_data["persona_ranks"] = []
         context.chat_data["metric"] = {"logic": 0, "spec": 0, "person": 0}
@@ -379,7 +387,7 @@ if __name__ == "__main__":
     # bot
     application = Application.builder().token("").build()
 
-    rank_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), msg_handler)
+    reply_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), msg_handler)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
@@ -387,7 +395,6 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("set_validation", set_val))
     application.add_handler(CommandHandler("persona", add_persona))
     application.add_handler(CallbackQueryHandler(button))
-    # application.add_handler(reply_handler)
-    application.add_handler(rank_handler)
+    application.add_handler(reply_handler)
 
     application.run_polling()
