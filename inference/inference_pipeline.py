@@ -62,7 +62,7 @@ class BiEncoder_GPT:
         candidats = torch.topk(candidats, top_k).indices
         return candidats.tolist(), distances.tolist()
 
-    def generate_reply(self, context_texts, gks) -> tuple:
+    def generate_reply(self, context_texts, gks, generate_gk=True) -> tuple:
         """генерирует ответ модели
 
         Args:
@@ -72,54 +72,24 @@ class BiEncoder_GPT:
         Returns:
             tuple(str, [list(str)]): 0 - сгенерированное сообщение, 1 - новые сгенерированные gk
         """
-        # TODO: расширить регулярки
         context_texts = [i[1] for i in context_texts]
-        print("gks", gks)
         dict_inp = [{"context": context_texts, "gk": gks, "candidate": ""}]
-        try:  # здесь модель может попытаться продолжить сообщение пользователя до конца как текст
-            gpt_inp = self.generative_model.collator.test(dict_inp)[0]["input_ids"][
-                :, -100:-2
-            ]
-            print(gpt_inp.size())
-            print("gpt_inp", self.generative_model.tokenizer.batch_decode(gpt_inp))
-            gpt_out = self.generative_model.GPT.generate(
-                gpt_inp,
-                max_new_tokens=64,
-            )
-            gpt_out = self.generative_model.tokenizer.decode(
-                gpt_out[0][-64:], skip_special_tokens=False
-            )
-            print(gpt_out)
-            gpt_out = gpt_out.split("[Gk]")
-            msg = (
-                gpt_out[-1]
-                .split("[P2u]")[1]
-                .split("[P1u]")[0]
-                .replace("<|endoftext|>", "")
-            )
-            new_gks = gpt_out[:-1]
-            return msg, new_gks
-        except IndexError:  # что бы избежать этого форсируем [P2u] токен
-            gpt_inp = self.generative_model.collator.test(dict_inp)[0]["input_ids"][
-                :, -100:-1
-            ]
-            print(gpt_inp.size())
-            print("gpt_inp", self.generative_model.tokenizer.batch_decode(gpt_inp))
-            gpt_out = self.generative_model.GPT.generate(
-                gpt_inp,
-                max_new_tokens=64,
-            )
-            gpt_out = self.generative_model.tokenizer.decode(
-                gpt_out[0][-65:], skip_special_tokens=False
-            )
-            print("her", gpt_out)
-            gpt_out = gpt_out.split("[Gk]")
-            print("her2", gpt_out)
-            msg = (
-                gpt_out[-1]
-                .split("[P2u]")[1]
-                .split("[P1u]")[0]
-                .replace("<|endoftext|>", "")
-            )
-            new_gks = gpt_out[:-1]
-            return msg, new_gks
+        gpt_inp = self.generative_model.collator.test(dict_inp)[0]["input_ids"][
+            :, -100:-1
+        ]
+        print("gpt_inp", self.generative_model.tokenizer.batch_decode(gpt_inp))
+        gpt_out = self.generative_model.GPT.generate(
+            gpt_inp,
+            max_new_tokens=64,
+        )
+        print("gpt_out_full", self.generative_model.tokenizer.batch_decode(gpt_out))
+        gpt_out = self.generative_model.tokenizer.decode(
+            gpt_out[0][-65:], skip_special_tokens=False
+        )
+        print("gpt_out", gpt_out)
+        gpt_out = gpt_out.split("[Gk]")
+        msg = (
+            gpt_out[-1].split("[P2u]")[1].split("[P1u]")[0].replace("<|endoftext|>", "")
+        )
+        new_gks = gpt_out[:-1]
+        return msg, new_gks

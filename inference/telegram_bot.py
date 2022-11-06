@@ -19,97 +19,26 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# mongodb
-def insert_document(
-    collection, dialog_id, user_id, history, persona_ranks, metric, persona_texts
-):
-    dialog_id = ObjectId(dialog_id)
-    dialog_data = collection.find_one({"_id": dialog_id})
-
-    user_msg = {"person": 0, "text": history[-2][1], "gk": [], "metric": metric}
-    model_msg = {
-        "person": 1,
-        "text": history[-1][1],
-        "gk": persona_ranks,
-        "metric": metric,
-    }
-    persons = [[], persona_texts]
-
-    if dialog_data is None:
-        masages = [user_msg, model_msg]
-        data = {"user_id": user_id, "persons": persons, "dialog": masages}
-        dialog_id = collection.insert_one(data).inserted_id
-    else:
-        dialog_data["dialog"].append(user_msg)
-        dialog_data["dialog"].append(model_msg)
-        collection.replace_one(
-            {"_id": dialog_data["_id"]},
-            {"user_id": user_id, "persons": persons, "dialog": dialog_data["dialog"]},
-        ).upserted_id
-
-    return str(dialog_id)
-
-
-#############################################
-
-
-def list_get(l, idx, default):
-    try:
-        return l[idx]
-    except IndexError:
-        return default
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-# mod 'val'/'smpl'
-# context history [("user", 'msg'),...]
-# persona_texts ['fact1', ...]
-# persona_vecs [tensor, ...]
-# persona_ranks (all:[int, ...], relevant:[int, ...])
-# persona_ranks_all (all:[int, ...], relevant:[int, ...]) > persona_ranks
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.chat_data["mod"] = "val"
+    context.chat_data["mod"] = "smpl"
     context.chat_data["history"] = []
     context.chat_data["persona_texts"] = []
     context.chat_data["persona_vecs"] = []
+    context.chat_data["persona_ranks_all"] = []
+    context.chat_data["persona_ranks"] = []
+    context.chat_data["metric"] = {"logic": 0, "spec": 0, "person": 0}
+    context.chat_data["dialog_id"] = None
+    context.chat_data["need_answer"] = False
+    context.chat_data["need_metric"] = False
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="все начинается с чистого листа!",
+        text="Персона бота и история сообщений очишена. Диалог начинается сначала.",
     )
 
 
-help_html = """
-<b>Это персонофицированная гибридная диалоговая модель, обученная на TolokaPersonaChat.</b>
-Для генерации ответов такие модели используют знания о своей персоне. Ранжируя кандидатов она отбирает релевантные знания о себе и затем использует их для последующей генерации ответа.
-<b>Репозиторий модели:</b> https://github.com/Anpopaicoconat/persona
-
-<b>Список команд:</b>
-- Для начала диалога или что бы закончить прошлый используйте /start.
-- Для создания персоны бота по умолчанию, используйте /persona 
-- Что бы добавить новые факты в персону модели используйте /persona и указывайте факты с новой строки. (что бы создать полностью собственную персону, указывайте факты изначально, не устанавливая дефолтную персону)
-Бот может работать в двух режимах. 
-- Для простой беседы с ботом используйте /set_simple в этом режиме бот отвечает на ваши сообщения и дополнительно может указать на какие знания о себе он опирался генерируя ответ, а так же может сгенерировать новое знание о себе, об этом он так же дополнительно сообщит вам.
-- Для беседы с расширенными возможностями управления используйте /set_validation в этом режиме бот в ответ на вашу реплику сначала проранжирует знания о себе и предоставит вам на выбор 10 наиболее релевантных фактов. После этого вы можете выбрать наиболее подходящие из них. Выбранный вами список будет использован для генерации ответа модели. После вам будет предложено оценить ответ. Ваша реплика, выбранные вами факты и оценка ответа модели будут сохранены и использованны для улучшения модели.
-
-<b>быстрый старт:</b>
-/start
-/set_simple
-/persona
-
-<b>быстрый старт в ручном режиме:</b>
-/start
-/set_validation
-/persona
-
-P.S. генерация ответа требует времени (в среднем 30 сек), дождитесь ответа и только после этого отправляейте следующее сообщение.
-"""
-
-
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_html = ""
     await update.message.reply_html(text=help_html)
 
 
@@ -129,35 +58,33 @@ async def set_val(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-DEFOLT_PERSONA = [
-    "я Саша",
-    "Я работаю инженером.",
-    "У меня трое детей",
-    "У меня есть котенок",
-    "Я живу в городе Москва",
-    "Я люблю рисовать",
-    "Имею высшее образование",
-    "У меня своя машина",
-    "Хобби - рыбалка",
-    "Люблю слушать шансон",
-    "У меня большая семья.",
-    "Мне нравится лето.",
-    "Я люблю комедии.",
-    "Я знаю четыре языка.",
-    "У меня есть дача.",
-    "Я люблю цитрусовые.",
-    "Я люблю читать книги.",
-    "Я мечтаю о море",
-    "Я люблю детей",
-    "Я никогда не видела жирафа",
-]
-
-
 async def add_persona(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    defolt_persona = [
+        "я Саша",
+        "Я работаю инженером.",
+        "У меня трое детей",
+        "У меня есть котенок",
+        "Я живу в городе Москва",
+        "Я люблю рисовать",
+        "Имею высшее образование",
+        "У меня своя машина",
+        "Хобби - рыбалка",
+        "Люблю слушать шансон",
+        "У меня большая семья.",
+        "Мне нравится лето.",
+        "Я люблю комедии.",
+        "Я знаю четыре языка.",
+        "У меня есть дача.",
+        "Я люблю цитрусовые.",
+        "Я люблю читать книги.",
+        "Я мечтаю о море",
+        "Я люблю детей",
+        "Я никогда не видела жирафа",
+    ]
     # proc persona
     texts = update.message.text.split("\n")[1:]
     if len(texts) < 1:
-        texts = DEFOLT_PERSONA
+        texts = defolt_persona
     vecs = model.calculate_candidats(texts)
     context.chat_data["persona_texts"] = context.chat_data["persona_texts"] + texts
     context.chat_data["persona_vecs"] = (
@@ -174,219 +101,228 @@ async def add_persona(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def smpl_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.chat_data["history"].append(("user", update.message.text))
-    relevant_gk_idx, distances = model.retrieve_gk(
-        context.chat_data["history"],
-        context.chat_data["persona_vecs"],
-        top_k=3,
-        th=0,
-    )
-    relevant_gk = [context.chat_data["persona_texts"][int(i)] for i in relevant_gk_idx]
-    msg, new_gks = model.generate_reply(context.chat_data["history"], relevant_gk)
-    context.chat_data["history"].append(("model", msg))
-    if len(relevant_gk) > 0:
-        relevant_gk = "Ответ был сделан с опорой на следующие знания:\n" + "\n".join(
-            [str(t) for t in relevant_gk]
-        )
-    else:
-        relevant_gk = None
-    if len(new_gks) > 0:
-        new_gks = "В ходе ответа я понял о себе следующиее:\n" + "\n".join(
-            [str(t) for t in new_gks]
-        )
-    else:
-        new_gks = None
-    return relevant_gk, msg, new_gks
-
-
-def save_answers(update, context):
-    # TODO: бывает что сохраняет 2 раза ответ модели, изза этого сбивается разметка и юзер становится 1 а модель 0
-    metric = context.chat_data.get("metric", False)
-    print(metric)
-    dialog_id = context.chat_data.get("dialog_id", None)
-    id = insert_document(
-        collection=DIALOG_TABLE,
-        dialog_id=dialog_id,
-        user_id=update.effective_chat.id,
-        history=context.chat_data["history"],
-        persona_ranks=context.chat_data["persona_ranks"],
-        metric=metric,
-        persona_texts=context.chat_data["persona_texts"],
-    )
-    return id
-
-
 async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.chat_data["history"].append(("user", update.message.text))
+
     if context.chat_data["mod"] == "smpl":
-        relevant_gk, msg, new_gks = smpl_reply(update, context)
-        if relevant_gk is not None:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id, text=relevant_gk
-            )
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
-        if new_gks is not None:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id, text=new_gks
-            )
-    elif context.chat_data["mod"] == "val":
-        # сохраняем предыдущий ответ
-        try:
-            dialog_id = save_answers(update, context)
-            context.chat_data["dialog_id"] = dialog_id
-        except:
-            print("!не сохранилось!")
-        context.chat_data["history"].append(("user", update.message.text))
-
-        # retrieve
-        try:
-            relevant_gk_idx, distances = model.retrieve_gk(
-                context.chat_data["history"],
-                context.chat_data["persona_vecs"],
-                top_k=10,
-                th=-1,
-            )
-        except:  # если не установили персону
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id, text="укажите персону /persona"
-            )
-
-        context.chat_data["persona_ranks_all"] = relevant_gk_idx
-        context.chat_data["persona_ranks"] = []
-        context.chat_data["metric"] = {"logic": 0, "spec": 0, "person": 0}
-        # reply
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    context.chat_data["persona_texts"][i], callback_data=i
-                )
-            ]
-            for i in context.chat_data["persona_ranks_all"]
-        ]
-        keyboard.append([InlineKeyboardButton("готово", callback_data="generate")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "выберите подходящие факты:", reply_markup=reply_markup
-        )
-
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parses the CallbackQuery and updates the message text."""
-    query = update.callback_query
-    if query.data.isdigit():
-        context.chat_data["persona_ranks"].append(int(query.data))
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    context.chat_data["persona_texts"][i], callback_data=i
-                )
-            ]
-            for i in context.chat_data["persona_ranks_all"]
-        ]
-        keyboard.append([InlineKeyboardButton("готово", callback_data="generate")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.answer()
-        gks = "\n".join(
-            context.chat_data["persona_texts"][i]
-            for i in context.chat_data["persona_ranks"]
-        )
-        await query.edit_message_text(
-            text=f"Выбранные факты:\n{gks}", reply_markup=reply_markup
-        )
-    elif query.data == "generate":
-        relevant_gk = [
-            context.chat_data["persona_texts"][int(i)]
-            for i in context.chat_data["persona_ranks"]
-        ]
-        msg, new_gks = model.generate_reply(context.chat_data["history"], relevant_gk)
-        context.chat_data["history"].append(("model", msg))
-        context.chat_data["persona_texts"] += new_gks
-        new_gks = "\n".join(new_gks)
+        msg, new_gks = generate(update, context)
         await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
         if new_gks:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="Новые знания о персоне:\n" + new_gks,
             )
+    elif context.chat_data["mod"] == "val":
+        context.chat_data["need_answer"] = True
+        context.chat_data["need_metric"] = True
+        if len(context.chat_data["persona_texts"]) == 0:
+            msg, new_gks = generate(update, context)
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+            if new_gks:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Новые знания о персоне:\n" + new_gks,
+                )
+        else:
+            relevant_gk_idx, distances = model.retrieve_gk(
+                context.chat_data["history"],
+                context.chat_data["persona_vecs"],
+                top_k=10,
+                th=-1,
+            )
+            context.chat_data["persona_ranks_all"] = relevant_gk_idx
+            context.chat_data["persona_ranks"] = []
+            # даем кандидатов на выбор
+            msg_text, reply_markup = rank_buttons(
+                context.chat_data["persona_texts"],
+                context.chat_data["persona_ranks_all"],
+                context.chat_data["persona_ranks"],
+            )
+            await update.message.reply_text(msg_text, reply_markup=reply_markup)
 
-        keyboard = [
-            [
-                InlineKeyboardButton("логичен 👌", callback_data="logic"),
-                InlineKeyboardButton("специфичен 👍", callback_data="spec"),
-                InlineKeyboardButton("персонален ❤️", callback_data="person"),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        metric = context.chat_data.get("metric", False)
-        answer = ", ".join(
-            [
-                x
-                for x, y in zip(["логичен", "специфичен", "персонален"], metric)
-                if metric[y]
-            ]
-        )
-        gks = "\n".join(
-            context.chat_data["persona_texts"][i]
-            for i in context.chat_data["persona_ranks"]
-        )
-        await query.edit_message_text(
-            text=f"Выбранные факты:\n{gks}\nОтвет был: {answer}",
-            reply_markup=reply_markup,
-        )
+
+def rank_buttons(persona_texts, persona_ranks_all, persona_ranks):
+    comand = "rank_"
+    keyboard = [
+        [InlineKeyboardButton(persona_texts[i], callback_data=comand + str(i))]
+        for i in persona_ranks_all
+    ]
+    keyboard.append([InlineKeyboardButton("готово", callback_data=comand + "generate")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if len(persona_ranks) == 0:
+        msg_text = "Выберите подходящие факты:"
     else:
-        context.chat_data["metric"][query.data] = 1
-        keyboard = [
-            [
-                InlineKeyboardButton("логичен 👌", callback_data="logic"),
-                InlineKeyboardButton("специфичен 👍", callback_data="spec"),
-                InlineKeyboardButton("персонален ❤️", callback_data="person"),
-            ]
+        msg_text = "\n".join(persona_texts[i] for i in persona_ranks)
+        msg_text = f"Выбранные факты:\n{msg_text}"
+    return msg_text, reply_markup
+
+
+def metric_buttons(metrics):
+    comand = "metric_"
+    labels = []
+    for text, marker, metric in zip(
+        ["логичен", "специфичен", "персонален"], ["👌", "👍", "❤️"], metrics
+    ):
+        if metrics[metric]:
+            labels.append(text + marker)
+        else:
+            labels.append(text)
+    keyboard = [
+        [
+            InlineKeyboardButton(text, callback_data=comand + data)
+            for text, data in zip(labels, metrics)
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        metric = context.chat_data.get("metric", False)
-        answer = ", ".join(
-            [
-                x
-                for x, y in zip(["логичен", "специфичен", "персонален"], metric)
-                if metric[y]
-            ]
+    ]
+    keyboard.append([InlineKeyboardButton("готово", callback_data=comand + "save")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg_text = "Оцените ответ."
+    return msg_text, reply_markup
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if "rank_" in query.data:
+        if context.chat_data["need_answer"]:
+            comand = query.data.split("_")[-1]
+            if comand != "generate":
+                comand = int(comand)
+                if comand in context.chat_data["persona_ranks"]:
+                    context.chat_data["persona_ranks"].remove(comand)
+                else:
+                    context.chat_data["persona_ranks"].append(comand)
+
+                msg_text, reply_markup = rank_buttons(
+                    context.chat_data["persona_texts"],
+                    context.chat_data["persona_ranks_all"],
+                    context.chat_data["persona_ranks"],
+                )
+                await query.edit_message_text(text=msg_text, reply_markup=reply_markup)
+            else:
+                # посылаем сообщение с ответом
+                msg, new_gks = generate(update, context)
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id, text=msg
+                )
+                if new_gks:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="Новые знания о персоне:\n" + new_gks,
+                    )
+                # создаем сообщение с метриками
+                context.chat_data["metric"] = {"logic": 0, "spec": 0, "person": 0}
+                msg_text, reply_markup = metric_buttons(context.chat_data["metric"])
+                # await update.message.reply_text(msg_text, reply_markup=reply_markup)
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=msg_text,
+                    reply_markup=reply_markup,
+                )
+
+    elif "metric_" in query.data:
+        if context.chat_data["need_metric"]:
+            comand = query.data.split("_")[-1]
+            if comand == "save":
+                save_masg(update, context)
+            else:
+                context.chat_data["metric"][comand] = (
+                    context.chat_data["metric"][comand] - 1
+                ) ** 2
+                msg_text, reply_markup = metric_buttons(context.chat_data["metric"])
+                await query.edit_message_text(text=msg_text, reply_markup=reply_markup)
+
+
+def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.chat_data["need_answer"] = False
+    context.chat_data["need_metric"] = True
+    relevant_gk = [
+        context.chat_data["persona_texts"][int(i)]
+        for i in context.chat_data["persona_ranks"]
+    ]
+    msg, new_gks = model.generate_reply(context.chat_data["history"], relevant_gk)
+    context.chat_data["history"].append(("model", msg))
+    # генерация знаний
+    if new_gks:
+        vecs = model.calculate_candidats(new_gks)
+        context.chat_data["persona_texts"] = (
+            context.chat_data["persona_texts"] + new_gks
         )
-        gks = "\n".join(
-            context.chat_data["persona_texts"][i]
-            for i in context.chat_data["persona_ranks"]
+        context.chat_data["persona_vecs"] = (
+            context.chat_data["persona_vecs"] + vecs.tolist()
         )
-        await query.edit_message_text(
-            text=f"Выбранные факты:\n{gks}\nОтвет был: {answer}",
-            reply_markup=reply_markup,
-        )
+        new_gks = "\n".join(new_gks)
+
+    return msg, new_gks
+
+
+def save_masg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.chat_data["need_answer"] = False
+    context.chat_data["need_metric"] = False
+    persons = [[], context.chat_data["persona_texts"]]
+    user_msg = {
+        "person": 0,
+        "text": context.chat_data["history"][-2][1],
+        "gk": [],
+        "metric": context.chat_data["metric"],
+    }
+    model_msg = {
+        "person": 1,
+        "text": context.chat_data["history"][-1][1],
+        "gk": context.chat_data["persona_ranks"],
+        "metric": context.chat_data["metric"],
+    }
+    if context.chat_data["dialog_id"] is None:
+        masages = [user_msg, model_msg]
+        data = {
+            "user_id": update.effective_chat.id,
+            "persons": persons,
+            "dialog": masages,
+        }
+        dialog_id = collection.insert_one(data).inserted_id
+        context.chat_data["dialog_id"] = dialog_id
+    else:
+        dialog_data = collection.find_one({"_id": context.chat_data["dialog_id"]})
+        dialog = dialog_data["dialog"] + [user_msg, model_msg]
+        collection.replace_one(
+            {"_id": dialog_data["_id"]},
+            {
+                "user_id": update.effective_chat.id,
+                "persons": persons,
+                "dialog": dialog,
+            },
+        ).upserted_id
+    # reset metrics
+    context.chat_data["metric"] = {"logic": 0, "spec": 0, "person": 0}
 
 
 if __name__ == "__main__":
     # proxy
+    print("proxy")
     os.environ["http_proxy"] = "http://proxy.ad.speechpro.com:3128"
     os.environ["https_proxy"] = "http://proxy.ad.speechpro.com:3128"
     os.environ["ftp_proxy"] = "http://proxy.ad.speechpro.com:3128"
-    # bongodb
+    # mongodb
+    print("mongodb")
     client = MongoClient("localhost", 27017)
     db = client["ChatBot-Data"]
-    DIALOG_TABLE = db["dialogs"]
+    collection = db["dialogs"]
     # model
+    print("model")
     bi_encoder = BERT_RetrievalModel.load_from_checkpoint(
         "/home/stc/persona/logs/bi_encoder/36037371cee4404b80aa618268a2e24c/checkpoints/epoch=29-step=22080.ckpt"
     )
     bi_encoder.eval()
     generative = GPT_GenerativeModel.load_from_checkpoint(
-        "/home/stc/persona/logs/gpt-epoch=00-val_loss=3.62.ckpt"
+        "/home/stc/persona/logs/gpt_answer/gpt-epoch=00-val_loss=3.62.ckpt"
     )
     generative.eval()
     model = BiEncoder_GPT(
         retrieval_model=bi_encoder,
         generative_model=generative,
     )
-
     # bot
+    print("bot")
     application = Application.builder().token("").build()
-
+    print("handler")
     reply_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), msg_handler)
 
     application.add_handler(CommandHandler("start", start))
@@ -394,7 +330,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("set_simple", set_smpl))
     application.add_handler(CommandHandler("set_validation", set_val))
     application.add_handler(CommandHandler("persona", add_persona))
-    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(reply_handler)
-
+    print("run_polling")
     application.run_polling()
