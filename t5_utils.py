@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 
 
 class Toloka_DS(torch.utils.data.Dataset):
-    def __init__(self, path, exaples, context_len=False, seed=42):
+    def __init__(self, path, exaples, ex_per_dialog, context_len=False, seed=42):
         """_summary_
 
         Args:
@@ -15,6 +15,8 @@ class Toloka_DS(torch.utils.data.Dataset):
                            all_gk - контекст+gk 1...контекст+gk n,
                            one_gk - контекст+ случайный gk n.
                            за 1 эпоху
+            ex_per_dialog (str): all - все реплики из диалога в эпохе,
+                           rnd - одна реплика из диалога в эпохе.
             context_len (bool, optional): rnd - случайная длинна контекста до кандидата
                                           all - весь доступный контекст
                                           one - 1 часть доступного контекста
@@ -24,6 +26,10 @@ class Toloka_DS(torch.utils.data.Dataset):
         self.data = []
         self.exaples = exaples
         self.context_len = context_len
+        self.ex_per_dialog = ex_per_dialog
+        self.prefix_context = "|DialogContext|:"
+        self.prefix_answer = "|DialogAnswer|:"
+        self.prefix_gk = "|DialogModelGK|:"
         with open(path, "r") as file:
             for line in file:
                 line = json.loads(line)
@@ -42,8 +48,8 @@ class Toloka_DS(torch.utils.data.Dataset):
     def get_examples(self, persons, dialog):
         dialog = self.join_same_person(dialog)
         for i in range(1, len(dialog)):
-            if self.ex_per_dialog == 'rnd':
-                i = random.randint(1, len(dialog))
+            if self.ex_per_dialog == "rnd":
+                i = random.randint(1, len(dialog) - 1)
 
             if self.context_len == "rnd":
                 start = random.randint(0, i - 1)
@@ -55,26 +61,24 @@ class Toloka_DS(torch.utils.data.Dataset):
             candidate = dialog[i]["text"]
             persona = persons[dialog[i]["person"]]
             label = 1
+            gks = [persona[idx] for idx in dialog[i]["gk"]]
             if self.exaples == "answer":
                 yield {
-                    "context": context,
-                    "answer": candidate,
-                    "persona": persona,
-                    "label": label,
+                    "query": {"content": context, "prefix": self.prefix_context},
+                    "candidat": {"content": candidate, "prefix": self.prefix_answer},
+                    "gks": {"content": gks, "prefix": self.prefix_gk},
                 }
             elif self.exaples[-2:] == "gk":
                 # gks = [p for idx, p in enumerate(persona) if idx in dialog[i]["gk"]]
-                gks = [persona[idx] for idx in dialog[i]["gk"]]
                 if self.exaples == "one_gk" and gks:
                     # что бы избежать попадания gk одного контекста в негативные берем 1 gk в эпоху
                     gks = [random.choice(gks)]
                 for gk in gks:
                     yield {
-                        "context": context,
-                        "gk": gk,
-                        "label": label,
+                        "query": {"content": context, "prefix": self.prefix_context},
+                        "candidat": {"content": gk, "prefix": self.prefix_gk},
                     }
-            if self.ex_per_dialog == 'rnd':
+            if self.ex_per_dialog == "rnd":
                 break
 
     def __len__(self) -> int:
@@ -134,19 +138,15 @@ class Collator:
         batch_new = {k: [] for k in batch[0]}
         for example in batch:
             for k in example:
-                batch_new[k].append(example[k])
+                batch_new[k].append(example[k]["content"])
         return batch_new
 
     def BiEncoder(self, batch):
+        context_prefix = batch[0]["query"]["prefix"]
+        candidat_prefix = batch[0]["candidat"]["prefix"]
         batch = self.rebatch(batch)
-        for k in batch:
-            if k == "context":
-                batch[k] = self.Context(batch[k], self.DialogContext)
-            elif k == "answer":
-                batch[k] = self.Candidat(batch[k], self.DialogAnswer)
-            elif k == "gk":
-                batch[k] = self.Candidat(batch[k], self.DialogModelGK)
-
+        batch["query"] = self.Context(batch["query"], context_prefix)
+        batch["candidat"] = self.Candidat(batch["candidat"], candidat_prefix)
         return batch
 
     def Context(self, batch, prefix):
@@ -194,3 +194,83 @@ class Collator:
                 dim=1,
             )
         return encoded_batch
+
+
+class SequntiaLoader:
+    """This class combines dataloaders and returns single batch from one of them per iteration
+    Attributes:
+        dataloders_dict (dict): dict with next structure:
+                key (str) - batch type that will be returned,
+                value (torch.utils.data.DataLoader) - dataloader.
+        lens_dict (dict): dict with next structure:
+                key (str) - batch type,
+                value (int) - length of single dataloader - k
+        full_len (int): full length of all dataloaders
+        batch_ogorder (list) - list of batch keys in sequential order
+        shuffle (bool) boolean that states elements order in batch:
+                True - returns batch from randomly chosen dataloader each iteration
+                False - returns batch from each dataloader sequentialy
+        batch_order (list) - current order of batch keys either shuffled or sequential which generates on each itteration loop
+        dataloders (dict) - current dict of iterable dataloders generates for each itteration loop
+    """
+
+    def __init__(self, dataloders: dict, shuffle: bool):
+        """
+        init:
+            dict containing: lengths of all dataloaders; full length of all dataloaders; sequential batch order
+        Args:
+            dataloders (dict): dict with following structure:
+                key - batch type that will be returned with batch content,
+                value - torch.utils.data.DataLoader
+            shuffle (bool) boolean that states elements order in batch:
+                True - returns batch from randomly chosen dataloader per iteration,
+                False - returns batch from each dataloader sequentialy
+        """
+        self.dataloders_dict = dataloders
+        self.lens_dict = {k: len(self.dataloders_dict[k]) for k in self.dataloders_dict}
+        self.full_len = sum([self.lens_dict[k] for k in self.lens_dict])
+        self.batch_ogorder = []
+        for k in self.lens_dict:
+            self.batch_ogorder += [k for _ in range(self.lens_dict[k])]
+        self.shuffle = shuffle
+
+    def __iter__(self) -> iter:
+        """init batch order and make dataloaders iterable
+
+        Returns:
+            iter: itterable object with chosen batch order
+        """
+        self.batch_order = self.batch_ogorder
+        if self.shuffle:
+            random.shuffle(self.batch_order)
+
+        self.dataloders = {
+            k: iter(self.dataloders_dict[k]) for k in self.dataloders_dict
+        }
+        self.batch_order = iter(self.batch_order)
+        return self
+
+    def __len__(self) -> int:
+        """returns full length of all dataloaders
+
+        Returns:
+            int: full length of all dataloaders
+        """
+        return self.full_len
+
+    def __next__(self) -> dict:
+        """returns batch from one of dataloders in chosen order
+
+        Raises:
+            StopIteration: when all dataloaders was iterated
+
+        Returns:
+            dict: with structure:
+                batch (any) - batch from dataloder
+                type (str) - key of dataloder from which batch is taken from
+        """
+        try:
+            k = next(self.batch_order)
+            return {"batch": next(self.dataloders[k]), "type": k}
+        except IndexError:
+            raise StopIteration
