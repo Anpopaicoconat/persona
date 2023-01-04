@@ -157,9 +157,9 @@ class MainCollator:
 
     def next_gk(self, batch, task):
         # query
-        query = [self.make_dialog(dialog) for dialog in batch["history"]]
+        query_texts = [self.make_dialog(dialog) for dialog in batch["history"]]
         query = self.tokenizer(
-            query,
+            query_texts,
             padding=True,
             truncation=True,
             add_special_tokens=False,
@@ -189,7 +189,7 @@ class MainCollator:
         candidate = self.add_prefix(candidate, candidate_prefix)
 
         # labels
-        labels = self.make_labels(query, candidate)
+        labels = self.make_labels(query_texts, batch["gk"], batch["all_gks"])
 
         return {"task": task, "query": query, "candidate": candidate, "labels": labels}
 
@@ -260,7 +260,17 @@ class MainCollator:
             )
         return input
 
-    def make_labels(self, query, candidate):
+    def make_labels(self, query, candidate, all_relevant_candidates):
         # TODO: проверку по совпадению
-        targets = torch.eye(query["input_ids"].size()[0], dtype=torch.long)
-        return targets
+        # targets = torch.eye(query["input_ids"].size()[0], dtype=torch.long)
+
+        labels = []
+        for i, q in enumerate(query):
+            row = []
+            for c in candidate:
+                if c in all_relevant_candidates[i]:
+                    row.append(1)
+                else:
+                    row.append(0)
+            labels.append(row)
+        return torch.tensor(labels)
