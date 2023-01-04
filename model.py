@@ -76,10 +76,11 @@ class T5MultiTask(pl.LightningModule):
             # Compute similarity scores
             scores = torch.mm(query, candidate.transpose(0, 1)) * self.hparams.scale
             # Symmetric loss as in CLIP
-            loss = (
-                self.cross_entropy_loss(scores, labels)
-                + self.cross_entropy_loss(scores.transpose(0, 1), labels)
-            ) / 2
+            # loss = (
+            #     self.cross_entropy_loss(scores, labels)
+            #     + self.cross_entropy_loss(scores.transpose(0, 1), labels)
+            # ) / 2
+            loss = self.triplet_loss(batch["labels"], scores)
             # metrics
             preds = scores.view(-1).cpu()
             targets = batch["labels"].reshape(preds.shape)
@@ -147,3 +148,14 @@ class T5MultiTask(pl.LightningModule):
                 f"{split}_mrr@{batch_size}_{task}": torchmetrics.RetrievalMRR(),
             }
         )
+
+    def triplet_loss(self, target, pred, margin=1.0):
+        pos_mask = target
+        neg_mask = torch.abs(target - 1)
+        n_pos = torch.sum(pos_mask, dim=-1)
+        n_neg = torch.sum(neg_mask, dim=-1)
+        sims_pos = pred * pos_mask
+        sims_neg = pred * pos_mask
+        mean_sim_pos = sims_pos / n_pos
+        mean_sim_neg = sims_neg / n_neg
+        return mean_sim_neg - mean_sim_pos + margin
