@@ -40,16 +40,22 @@ class T5MultiTask(pl.LightningModule):
 
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
 
-        self.val_metrics = {}
+        self.val_next_gk_metrics = {}
         for task in self.hparams.datasets:
-            self.val_metrics[task] = self.make_metrics_collection(
+            self.val_next_gk_metrics[task] = self.make_metrics_collection(
                 "val", self.hparams.val_batch_size, task
             )
-        self.train_metrics = {}
+        self.train_next_gk_metrics = {}
         for task in self.hparams.datasets:
-            self.train_metrics[task] = self.make_metrics_collection(
+            self.train_next_gk_metrics[task] = self.make_metrics_collection(
                 "train", self.hparams.val_batch_size, task
             )
+        self.val_current_gk_metrics = torchmetrics.MetricCollection(
+            {
+                "val_BLEU1": torchmetrics.BLEUScore(n_gram=1),
+                "val_BLEU2": torchmetrics.BLEUScore(n_gram=2),
+            }
+        )
 
     def get_embedding(self, inputs):
         model_output = self.transformer(
@@ -67,7 +73,9 @@ class T5MultiTask(pl.LightningModule):
 
         return embeddings
 
-    def forward1(self, batch, task):
+    def training_step(self, batch: dict, batch_idx):
+        task = batch["task"]
+        batch = batch[task]
         if task == "next_gk":
             # Compute embeddings
             query = self.get_embedding(batch["query"])
@@ -90,31 +98,60 @@ class T5MultiTask(pl.LightningModule):
                 .expand_as(scores)
                 .reshape(preds.shape)
             )
+            # Log
+            self.log("train_loss_next_gk", loss.item(), sync_dist=True)
+            metrics = self.train_next_gk_metrics[task](preds, targets, indexes)
+            self.log_dict(metrics, sync_dist=True)
+        elif task == "current_gk":
+            model_output = self.transformer(
+                input_ids=batch["query"]["input_ids"],
+                attention_mask=batch["query"]["attention_mask"],
+                labels=batch["candidate"]["input_ids"],
+            )
+            loss = model_output.loss
 
-            return loss, preds, targets, indexes
-
-    def training_step(self, batch: dict, batch_idx):
-        task = batch["task"]
-        batch = batch[task]
-        loss, preds, targets, indexes = self.forward1(batch, task)
-
-        # Log
-        self.log("train_loss", loss.item(), sync_dist=True)
-        metrics = self.train_metrics[task](preds, targets, indexes)
-        self.log_dict(metrics, sync_dist=True)
         return loss
 
     def validation_step(self, batch: dict, batch_idx):
         task = batch["task"]
         batch = batch[task]
-
-        loss, preds, targets, indexes = self.forward1(batch, task)
-
-        # Log
-        self.log("val_loss", loss.item(), sync_dist=True)
-        metrics = self.val_metrics[task](preds, targets, indexes)
-        self.log_dict(metrics, sync_dist=True)
-        return loss
+        if task == "next_gk":
+            # Compute embeddings
+            query = self.get_embedding(batch["query"])
+            candidate = self.get_embedding(batch["candidate"])
+            labels = torch.argmax(batch["labels"], dim=-1)
+            # Compute similarity scores
+            scores = torch.mm(query, candidate.transpose(0, 1)) * self.hparams.scale
+            # Symmetric loss as in CLIP
+            # loss = (
+            #     self.cross_entropy_loss(scores, labels)
+            #     + self.cross_entropy_loss(scores.transpose(0, 1), labels)
+            # ) / 2
+            loss = self.triplet_loss(batch["labels"], scores)
+            # metrics
+            preds = scores.view(-1).cpu()
+            targets = batch["labels"].reshape(preds.shape)
+            indexes = (
+                torch.arange(scores.shape[0])
+                .unsqueeze(1)
+                .expand_as(scores)
+                .reshape(preds.shape)
+            )
+            # Log
+            self.log("val_next_gk_loss", loss.item(), sync_dist=True)
+            metrics = self.val_next_gk_metrics[task](preds, targets, indexes)
+            self.log_dict(metrics, sync_dist=True)
+        elif task == "current_gk":
+            model_output = self.transformer.generate(
+                input_ids=batch["query"]["input_ids"]
+            )
+            target_candidate = self.hparams.tokenizer.batch_decode(
+                batch["candidate"]["input_ids"]
+            )
+            target_candidate = [[i] for i in target_candidate]
+            output_candidate = self.hparams.tokenizer.batch_decode(model_output)
+            metrics = self.val_current_gk_metrics(output_candidate, target_candidate)
+            self.log_dict(metrics, sync_dist=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -158,4 +195,4 @@ class T5MultiTask(pl.LightningModule):
         sims_neg = pred * pos_mask
         mean_sim_pos = sims_pos / n_pos
         mean_sim_neg = sims_neg / n_neg
-        return mean_sim_neg - mean_sim_pos + margin
+        return torch.mean(mean_sim_neg - mean_sim_pos + margin) * 10

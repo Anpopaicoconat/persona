@@ -142,9 +142,9 @@ class MainCollator:
             [query_prefix], add_special_tokens=False, return_tensors="pt"
         )
         query = self.add_prefix(query, query_prefix)
-
         # output
-        candidate = batch["gk"]
+        candidate = [self.make_gk(gk) for gk in batch["gk"]]
+
         candidate = self.tokenizer(
             candidate,
             padding=True,
