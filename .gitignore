@@ -7,3 +7,4 @@ test.py
 data/current_gk
 data/next_answer
 data/next_gk
+data/raw/all_dialogs.jsonl
