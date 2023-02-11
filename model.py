@@ -22,40 +22,47 @@ class T5MultiTask(pl.LightningModule):
     def __init__(
         self,
         model,
-        tokenizer,
-        datasets: List,
+        datamodule,
         lr: float = 5e-5,
         num_warmup_steps: int = 100,
         pooling: Literal["mean", "cls"] = "mean",
         distance: Literal["cosine", "dot_product"] = "cosine",
         scale: int = 20,
+        train_batch_size: int = 64,
         val_batch_size: int = 64,
+        test_batch_size: int = 64,
     ):
         super().__init__()
         self.save_hyperparameters()
 
         self.transformer = model
-        # self.tokenizer = tokenizer
-        self.transformer.resize_token_embeddings(len(self.hparams.tokenizer))
+        self.datamodule = datamodule
+        self.transformer.resize_token_embeddings(len(self.datamodule.tokenizer))
 
+        # loss
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
 
-        self.val_next_gk_metrics = {}
-        for task in self.hparams.datasets:
-            self.val_next_gk_metrics[task] = self.make_metrics_collection(
-                "val", self.hparams.val_batch_size, task
-            )
-        self.train_next_gk_metrics = {}
-        for task in self.hparams.datasets:
-            self.train_next_gk_metrics[task] = self.make_metrics_collection(
-                "train", self.hparams.val_batch_size, task
-            )
-        self.val_current_gk_metrics = torchmetrics.MetricCollection(
+        # metrics
+        # next answer
+        next_answer_metrics = torchmetrics.MetricCollection(
             {
-                "val_BLEU1": torchmetrics.BLEUScore(n_gram=1),
-                "val_BLEU2": torchmetrics.BLEUScore(n_gram=2),
+                "next_answer_BLEU1": torchmetrics.BLEUScore(n_gram=1),
+                "next_answer_BLEU2": torchmetrics.BLEUScore(n_gram=2),
             }
         )
+        self.train_next_answer_metrics = next_answer_metrics.clone(prefix="train_")
+        self.val_next_answer_metrics = next_answer_metrics.clone(prefix="val_")
+        # current gk
+        current_gk_metrics = torchmetrics.MetricCollection(
+            {
+                "current_gk_BLEU1": torchmetrics.BLEUScore(n_gram=1),
+                "current_gk_BLEU2": torchmetrics.BLEUScore(n_gram=2),
+            }
+        )
+        self.train_current_gk_metrics = current_gk_metrics.clone(prefix="train_")
+        self.val_current_gk_metrics = current_gk_metrics.clone(prefix="val_")
+        # next gk
+        # TODO: add MetricCollection for next gk: r1 r5 mrr
 
     def get_embedding(self, inputs):
         model_output = self.transformer(
@@ -76,7 +83,7 @@ class T5MultiTask(pl.LightningModule):
     def training_step(self, batch: dict, batch_idx):
         task = batch["task"]
         batch = batch[task]
-        if task == "next_gk":
+        if task == "next_gk" and False:
             # Compute embeddings
             query = self.get_embedding(batch["query"])
             candidate = self.get_embedding(batch["candidate"])
@@ -84,11 +91,10 @@ class T5MultiTask(pl.LightningModule):
             # Compute similarity scores
             scores = torch.mm(query, candidate.transpose(0, 1)) * self.hparams.scale
             # Symmetric loss as in CLIP
-            # loss = (
-            #     self.cross_entropy_loss(scores, labels)
-            #     + self.cross_entropy_loss(scores.transpose(0, 1), labels)
-            # ) / 2
-            loss = self.triplet_loss(batch["labels"], scores)
+            loss = (
+                self.cross_entropy_loss(scores, labels)
+                + self.cross_entropy_loss(scores.transpose(0, 1), labels)
+            ) / 2
             # metrics
             preds = scores.view(-1).cpu()
             targets = batch["labels"].reshape(preds.shape)
@@ -102,20 +108,61 @@ class T5MultiTask(pl.LightningModule):
             self.log("train_loss_next_gk", loss.item(), sync_dist=True)
             metrics = self.train_next_gk_metrics[task](preds, targets, indexes)
             self.log_dict(metrics, sync_dist=True)
+
+        # current gk
         elif task == "current_gk":
             model_output = self.transformer(
                 input_ids=batch["query"]["input_ids"],
                 attention_mask=batch["query"]["attention_mask"],
                 labels=batch["candidate"]["input_ids"],
             )
+            # loss
             loss = model_output.loss
+            # metrics
+            model_output = self.transformer.generate(
+                input_ids=batch["query"]["input_ids"],
+                do_sample=True,
+                num_beams=4,
+                # temperature=0.01,
+            )
+            target_candidate = self.datamodule.tokenizer.batch_decode(
+                batch["candidate"]["input_ids"]
+            )
+            target_candidate = [[i] for i in target_candidate]
+            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            metrics = self.train_current_gk_metrics(output_candidate, target_candidate)
+            self.log_dict(metrics, sync_dist=True)
+
+        # next answer
+        elif task == "next_answer":
+            model_output = self.transformer(
+                input_ids=batch["query"]["input_ids"],
+                attention_mask=batch["query"]["attention_mask"],
+                labels=batch["candidate"]["input_ids"],
+            )
+            # loss
+            loss = model_output.loss
+            # metrics
+            model_output = self.transformer.generate(
+                input_ids=batch["query"]["input_ids"],
+                do_sample=True,
+                num_beams=4,
+                # temperature=0.01,
+            )
+            target_candidate = self.datamodule.tokenizer.batch_decode(
+                batch["candidate"]["input_ids"]
+            )
+            target_candidate = [[i] for i in target_candidate]
+            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            metrics = self.train_next_answer_metrics(output_candidate, target_candidate)
+            self.log_dict(metrics, sync_dist=True)
 
         return loss
 
     def validation_step(self, batch: dict, batch_idx):
         task = batch["task"]
         batch = batch[task]
-        if task == "next_gk":
+        if task == "next_gk" and False:
             # Compute embeddings
             query = self.get_embedding(batch["query"])
             candidate = self.get_embedding(batch["candidate"])
@@ -141,16 +188,53 @@ class T5MultiTask(pl.LightningModule):
             self.log("val_next_gk_loss", loss.item(), sync_dist=True)
             metrics = self.val_next_gk_metrics[task](preds, targets, indexes)
             self.log_dict(metrics, sync_dist=True)
+
+        # current gk
         elif task == "current_gk":
-            model_output = self.transformer.generate(
-                input_ids=batch["query"]["input_ids"]
+            model_output = self.transformer(
+                input_ids=batch["query"]["input_ids"],
+                attention_mask=batch["query"]["attention_mask"],
+                labels=batch["candidate"]["input_ids"],
             )
-            target_candidate = self.hparams.tokenizer.batch_decode(
+            # loss
+            loss = model_output.loss
+            # metrics
+            model_output = self.transformer.generate(
+                input_ids=batch["query"]["input_ids"],
+                do_sample=True,
+                num_beams=4,
+                # temperature=0.01,
+            )
+            target_candidate = self.datamodule.tokenizer.batch_decode(
                 batch["candidate"]["input_ids"]
             )
             target_candidate = [[i] for i in target_candidate]
-            output_candidate = self.hparams.tokenizer.batch_decode(model_output)
+            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
             metrics = self.val_current_gk_metrics(output_candidate, target_candidate)
+            self.log_dict(metrics, sync_dist=True)
+
+        # next answer
+        elif task == "next_answer":
+            model_output = self.transformer(
+                input_ids=batch["query"]["input_ids"],
+                attention_mask=batch["query"]["attention_mask"],
+                labels=batch["candidate"]["input_ids"],
+            )
+            # loss
+            loss = model_output.loss
+            # metrics
+            model_output = self.transformer.generate(
+                input_ids=batch["query"]["input_ids"],
+                do_sample=True,
+                num_beams=4,
+                # temperature=0.01,
+            )
+            target_candidate = self.datamodule.tokenizer.batch_decode(
+                batch["candidate"]["input_ids"]
+            )
+            target_candidate = [[i] for i in target_candidate]
+            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            metrics = self.val_next_answer_metrics(output_candidate, target_candidate)
             self.log_dict(metrics, sync_dist=True)
 
     def configure_optimizers(self):
@@ -176,15 +260,6 @@ class T5MultiTask(pl.LightningModule):
 
     def cls_pooling(self, model_output: torch.Tensor):
         return model_output.encoder_last_hidden_state[:, 0]
-
-    def make_metrics_collection(self, split, batch_size, task):
-        return torchmetrics.MetricCollection(
-            {
-                f"{split}_r1@{batch_size}_{task}": torchmetrics.RetrievalRecall(k=1),
-                f"{split}_r5@{batch_size}_{task}": torchmetrics.RetrievalRecall(k=5),
-                f"{split}_mrr@{batch_size}_{task}": torchmetrics.RetrievalMRR(),
-            }
-        )
 
     def triplet_loss(self, target, pred, margin=1.0):
         pos_mask = target

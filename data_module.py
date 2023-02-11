@@ -17,7 +17,7 @@ class TolokaDataModule(pl.LightningDataModule):
         self,
         data_dir: str,
         datasets: List[str],
-        tokenizer_d: str,
+        tokenizer: str,
         spec_tokens: dict,
         train_batch_size: int,
         val_batch_size: int,
@@ -33,7 +33,8 @@ class TolokaDataModule(pl.LightningDataModule):
         datasets_instanse = [ds.load_from_disk(path) for path in datasets_path]
         self.datasets = {k: v for k, v in zip(self.hparams.datasets, datasets_instanse)}
 
-        self.collator = MainCollator(tokenizer_d, spec_tokens)
+        self.tokenizer = tokenizer
+        self.collator = MainCollator(tokenizer, spec_tokens)
 
     def train_dataloader(self):
         try:
