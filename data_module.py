@@ -76,7 +76,7 @@ class TolokaDataModule(pl.LightningDataModule):
             ep = 0
         # shuffle train split
         datasets = {
-            dataset_name: self.datasets[dataset_name]["test"].shuffle(
+            dataset_name: self.datasets[dataset_name]["val"].shuffle(
                 seed=self.hparams.seed + ep
             )
             for dataset_name in self.datasets
@@ -145,7 +145,6 @@ class MainCollator:
         query = self.add_prefix(query, query_prefix)
         # output
         candidate = [self.make_gk(gk) for gk in batch["gk"]]
-
         candidate = self.tokenizer(
             candidate,
             padding=True,
@@ -154,6 +153,14 @@ class MainCollator:
             max_length=32,
             return_tensors="pt",
         )
+        # for q, c in zip(
+        #     self.tokenizer.batch_decode(query["input_ids"]),
+        #     self.tokenizer.batch_decode(candidate["input_ids"]),
+        # ):
+        #     print(q)
+        #     print(c)
+        #     print()
+        # 0 / 0
         return {"task": task, "query": query, "candidate": candidate}
 
     def next_gk(self, batch, task):
@@ -225,6 +232,14 @@ class MainCollator:
             max_length=32,
             return_tensors="pt",
         )
+        # for q, c in zip(
+        #     self.tokenizer.batch_decode(query["input_ids"]),
+        #     self.tokenizer.batch_decode(candidate["input_ids"]),
+        # ):
+        #     print(q)
+        #     print(c)
+        #     print()
+        # 0 / 0
         return {"task": task, "query": query, "candidate": candidate}
 
     def make_msg(self, msg_dict):

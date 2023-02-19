@@ -120,16 +120,15 @@ class T5MultiTask(pl.LightningModule):
             loss = model_output.loss
             # metrics
             model_output = self.transformer.generate(
-                input_ids=batch["query"]["input_ids"],
-                do_sample=True,
-                num_beams=4,
-                # temperature=0.01,
+                input_ids=batch["query"]["input_ids"]
             )
             target_candidate = self.datamodule.tokenizer.batch_decode(
-                batch["candidate"]["input_ids"]
+                batch["candidate"]["input_ids"], skip_special_tokens=True
             )
             target_candidate = [[i] for i in target_candidate]
-            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            output_candidate = self.datamodule.tokenizer.batch_decode(
+                model_output, skip_special_tokens=True
+            )
             metrics = self.train_current_gk_metrics(output_candidate, target_candidate)
             self.log_dict(metrics, sync_dist=True)
 
@@ -145,15 +144,14 @@ class T5MultiTask(pl.LightningModule):
             # metrics
             model_output = self.transformer.generate(
                 input_ids=batch["query"]["input_ids"],
-                do_sample=True,
-                num_beams=4,
-                # temperature=0.01,
             )
             target_candidate = self.datamodule.tokenizer.batch_decode(
-                batch["candidate"]["input_ids"]
+                batch["candidate"]["input_ids"], skip_special_tokens=True
             )
             target_candidate = [[i] for i in target_candidate]
-            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            output_candidate = self.datamodule.tokenizer.batch_decode(
+                model_output, skip_special_tokens=True
+            )
             metrics = self.train_next_answer_metrics(output_candidate, target_candidate)
             self.log_dict(metrics, sync_dist=True)
 
@@ -201,15 +199,14 @@ class T5MultiTask(pl.LightningModule):
             # metrics
             model_output = self.transformer.generate(
                 input_ids=batch["query"]["input_ids"],
-                do_sample=True,
-                num_beams=4,
-                # temperature=0.01,
             )
             target_candidate = self.datamodule.tokenizer.batch_decode(
-                batch["candidate"]["input_ids"]
+                batch["candidate"]["input_ids"], skip_special_tokens=True
             )
             target_candidate = [[i] for i in target_candidate]
-            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            output_candidate = self.datamodule.tokenizer.batch_decode(
+                model_output, skip_special_tokens=True
+            )
             metrics = self.val_current_gk_metrics(output_candidate, target_candidate)
             self.log_dict(metrics, sync_dist=True)
 
@@ -225,15 +222,14 @@ class T5MultiTask(pl.LightningModule):
             # metrics
             model_output = self.transformer.generate(
                 input_ids=batch["query"]["input_ids"],
-                do_sample=True,
-                num_beams=4,
-                # temperature=0.01,
             )
             target_candidate = self.datamodule.tokenizer.batch_decode(
-                batch["candidate"]["input_ids"]
+                batch["candidate"]["input_ids"], skip_special_tokens=True
             )
             target_candidate = [[i] for i in target_candidate]
-            output_candidate = self.datamodule.tokenizer.batch_decode(model_output)
+            output_candidate = self.datamodule.tokenizer.batch_decode(
+                model_output, skip_special_tokens=True
+            )
             metrics = self.val_next_answer_metrics(output_candidate, target_candidate)
             self.log_dict(metrics, sync_dist=True)
 
