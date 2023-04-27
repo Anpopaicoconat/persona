@@ -1,0 +1,17 @@
+{
+    "task1": "|GenerateAnswerGK|:",
+    "task2": "|GenerateAnswer|:",
+    "task3": "|GenerateGK|:",
+    "task4q": "|RetrieveGK-Q|:",
+    "task4c": "|RetrieveGK-C|:",
+    "task5q": "|RetrieveAnswer-Q|:",
+    "task5c": "|RetrieveAnswer-C|:",
+    "model_answer": "[Model]",
+    "user_answer": "[User]",
+    "male_gender": "[MaleGender]",
+    "female_gender": "[FemaleGender]",
+    "unknown_gender": "[UnknownGender]",
+    "model_gk": "[ModelGK]",
+    "user_gk": "[UserGK]",
+    "world_gk": "[WorldGK]"
+}
