@@ -4,6 +4,6 @@ pretrain_models
 logs
 test.ipynb
 test.py
-data/processed
-data/raw
-
+data/processed/current_gk
+data/processed/next_answer
+data/processed/next_gk

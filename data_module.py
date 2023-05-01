@@ -2,9 +2,10 @@ from typing import *
 
 import pytorch_lightning as pl
 import transformers
+import datasets
 
 from model import *
-from utils import InterleaveDatasetsLoader, MultiCollator
+from utils import *
 
 
 def parse_recursive_dict(inp_dict, tokens=None):
@@ -25,7 +26,6 @@ class MultiDataModule(pl.LightningDataModule):
         data_dir: str = "",
         spec_tokens: Dict = {},
         seed: int = 42,
-        shuffle_window_size: int = 64,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -61,7 +61,41 @@ class MultiDataModule(pl.LightningDataModule):
                 )
 
     def train_dataloader(self):
-        return None
+        batch_sizes = []
+        for task in self.tasks:
+            for dataset_name in task.datasets:
+                batch_sizes.append(task.train_bs)
+        try:
+            ep = self.trainer.current_epoch
+        except:
+            ep = 0
+        # shuffle train split
+        datasets = {
+            dataset_name: self.datasets[dataset_name]["train"].shuffle(
+                seed=self.hparams.seed + ep
+            )
+            for dataset_name in self.datasets
+        }
+        # make batch
+        datasets = [
+            datasets[task].map(
+                lambda batch, task: {
+                    task: [self.collator(batch, task)],
+                    "task": [task],
+                },
+                batched=True,
+                batch_size=self.hparams.train_batch_size,
+                remove_columns=datasets[task].column_names,
+                fn_kwargs={"task": task},
+                drop_last_batch=True,
+                num_proc=1,
+            )
+            for task in datasets
+        ]
+        ds_num_batch = [len(ds) for ds in datasets]
+        ds_prob = [size / sum(ds_num_batch) for size in ds_num_batch]
+        train_dataloader = datasets.interleave_datasets(datasets, probabilities=ds_prob)
+        return train_dataloader.with_format("pytorch")
 
     def val_dataloader(self):
         return None

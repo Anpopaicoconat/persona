@@ -7,55 +7,10 @@ import transformers
 import pandas as pd
 import numpy as np
 import os
-from data_module import DSTCDataModule
+from data_module import MultiDataModule
 from utils import *
 
 import requests
-
-
-class TaskConfig:
-    pass
-
-
-class Seq2SeqConfig(TaskConfig):
-    def __init__(
-        self,
-        task_name: Literal["seq2seq"],
-        collator_type: Literal[
-            "multiclass", "multilabel", "knowledgegrounded", "crossencoder"
-        ],
-        forward_type: str,
-        tokenizer: transformers.AutoTokenizer,
-        spec_tokens_dict: Dict,
-        collator_conf: Dict,
-        datasets: Dict,
-        train_bs: int = 64,
-        val_bs: int = 64,
-        test_bs: int = 64,
-    ):
-        self.task_name = task_name
-        self.collator_type = collator_type
-        self.forward_type = forward_type
-        self.train_bs = train_bs
-        self.val_bs = val_bs
-        self.test_bs = test_bs
-        if forward_type == "seq2seq" and collator_type == "multiclass":
-            self.collator = Seq2SeqMultiClass_Collator(
-                tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
-            )
-        elif forward_type == "seq2seq" and collator_type == "multilabel":
-            self.collator = Seq2SeqMultiLabel_Collator(
-                tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
-            )
-        elif forward_type == "seq2seq" and collator_type == "knowledgegrounded":
-            self.collator = Seq2SeqKnowledgeGrounded_Collator(
-                tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
-            )
-        elif forward_type == "seq2seq" and collator_type == "crossencoder":
-            self.collator = Seq2SeqCrossEncoder_Collator(
-                tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
-            )
-        self.datasets = datasets
 
 
 class MultitaskModel(pl.LightningModule):
@@ -66,7 +21,6 @@ class MultitaskModel(pl.LightningModule):
         spec_tokens_dict: Dict,
         tasks: Dict,
         seed: int = 42,
-        shuffle_window_size: int = 10000,
         lr: float = 5e-05,
         num_warmup_steps: int = 100,
     ):
@@ -80,7 +34,7 @@ class MultitaskModel(pl.LightningModule):
         self.metrics_dict = {}
         task_list = []
         for task_name in tasks:
-            task = Seq2SeqConfig(
+            task = TaskConfig(
                 task_name=task_name,
                 tokenizer=self.tokenizer,
                 spec_tokens_dict=spec_tokens_dict,
@@ -88,49 +42,48 @@ class MultitaskModel(pl.LightningModule):
             )
             task_list.append(task)
             # init metrics
-            if task.collator_type == "multiclass":
-                metrics = torchmetrics.MetricCollection(
-                    {
-                        f"{task.task_name}_F1": torchmetrics.F1Score(
-                            task="multiclass", num_classes=len(task.collator.classes)
-                        )
-                    }
-                )
-            elif task.collator_type == "multilabel":
-                metrics = torchmetrics.MetricCollection(
-                    {
-                        f"{task.task_name}_F1": torchmetrics.F1Score(
-                            task="multilabel", num_labels=len(task.collator.classes)
-                        )
-                    }
-                )
-            elif task.collator_type == "knowledgegrounded":
-                metrics = torchmetrics.MetricCollection(
-                    {
-                        f"{task.task_name}_BLEU1": torchmetrics.BLEUScore(n_gram=1),
-                        f"{task.task_name}_BLEU2": torchmetrics.BLEUScore(n_gram=2),
-                    }
-                )
-            elif task.collator_type == "crossencoder":
-                metrics = torchmetrics.MetricCollection(
-                    {
-                        f"{task.task_name}_Recall": torchmetrics.Recall(
-                            task="multiclass", num_classes=len(task.collator.scores)
-                        ),
-                    }
-                )
-            self.metrics_dict[task.task_name] = {}
-            self.metrics_dict[task.task_name]["train"] = metrics.clone(prefix="train_")
-            self.metrics_dict[task.task_name]["val"] = metrics.clone(prefix="val_")
+            # if task.collator_type == "multiclass":
+            #     metrics = torchmetrics.MetricCollection(
+            #         {
+            #             f"{task.task_name}_F1": torchmetrics.F1Score(
+            #                 task="multiclass", num_classes=len(task.collator.classes)
+            #             )
+            #         }
+            #     )
+            # elif task.collator_type == "multilabel":
+            #     metrics = torchmetrics.MetricCollection(
+            #         {
+            #             f"{task.task_name}_F1": torchmetrics.F1Score(
+            #                 task="multilabel", num_labels=len(task.collator.classes)
+            #             )
+            #         }
+            #     )
+            # elif task.collator_type == "knowledgegrounded":
+            #     metrics = torchmetrics.MetricCollection(
+            #         {
+            #             f"{task.task_name}_BLEU1": torchmetrics.BLEUScore(n_gram=1),
+            #             f"{task.task_name}_BLEU2": torchmetrics.BLEUScore(n_gram=2),
+            #         }
+            #     )
+            # elif task.collator_type == "crossencoder":
+            #     metrics = torchmetrics.MetricCollection(
+            #         {
+            #             f"{task.task_name}_Recall": torchmetrics.Recall(
+            #                 task="multiclass", num_classes=len(task.collator.scores)
+            #             ),
+            #         }
+            #     )
+            # self.metrics_dict[task.task_name] = {}
+            # self.metrics_dict[task.task_name]["train"] = metrics.clone(prefix="train_")
+            # self.metrics_dict[task.task_name]["val"] = metrics.clone(prefix="val_")
 
         # init data module
-        self.data_module = DSTCDataModule(
+        self.data_module = MultiDataModule(
             tasks=task_list,
-            model_name_or_path=self.hparams.model_name_or_path,
+            tokenizer=self.tokenizer,
             data_dir=self.hparams.data_dir,
             spec_tokens=self.hparams.spec_tokens_dict,
             seed=self.hparams.seed,
-            shuffle_window_size=self.hparams.shuffle_window_size,
         )
 
     def seq2seq(self, batch, meta):

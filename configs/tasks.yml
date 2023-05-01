@@ -1,0 +1,128 @@
+# pytorch_lightning==1.8.3.post1
+
+model:
+  tasks:
+  #
+    # knowledge_ground_generation:
+    #   train_bs: 32
+    #   val_bs: 32
+    #   test_bs: 32
+    #   datasets:
+    #     name: path
+        
+    #   collator_conf:
+    #     inp_prefix: 'dialog: '
+    #     knowledge_prefix: 'knowledge: '
+    #     out_prefix: null
+
+    #     inp_padding_side: right
+    #     knowledge_padding_side: right
+    #     out_padding_side: right
+
+    #     inp_truncation_side: left
+    #     knowledge_truncation_side: right
+    #     out_truncation_side: right
+
+    #     inp_max_len: 64
+    #     knowledge_max_len: 64
+    #     out_max_len: 32
+
+    #     inp_padding: true
+    #     knowledge_padding: true
+    #     out_padding: true
+
+    #     inp_truncation: true
+    #     knowledge_truncation: true
+    #     out_truncation: true
+
+    #     inp_add_special_tokens: true
+    #     knowledge_add_special_tokens: true
+    #     out_add_special_tokens: false
+
+    #     return_tensors: pt
+    #     num_turns: -1
+
+    #     turn_separator: '[turn-sep]'
+    #     speakers_seps: 
+    #       - '|speakerA|: '
+    #       - '|speakerB|: '
+    
+    # #
+    # knowledge_retrieval:
+    #   train_bs: 32
+    #   val_bs: 32
+    #   test_bs: 32
+    #   datasets:
+    #     name: path
+        
+
+    #   collator_conf:
+    #     inp_prefix: 'dialog: '
+    #     knowledge_prefix: 'knowledge: '
+    #     out_prefix: null
+
+    #     inp_padding_side: right
+    #     knowledge_padding_side: right
+    #     out_padding_side: right
+
+    #     inp_truncation_side: left
+    #     knowledge_truncation_side: right
+    #     out_truncation_side: right
+
+    #     inp_max_len: 64
+    #     knowledge_max_len: 64
+    #     out_max_len: 32
+
+    #     inp_padding: true
+    #     knowledge_padding: true
+    #     out_padding: true
+
+    #     inp_truncation: true
+    #     knowledge_truncation: true
+    #     out_truncation: true
+
+    #     inp_add_special_tokens: true
+    #     knowledge_add_special_tokens: true
+    #     out_add_special_tokens: false
+
+    #     return_tensors: pt
+    #     num_turns: -1
+        
+    #     outputs:
+    #       - 'да'
+    #       - 'нет'
+
+    
+    #
+    knowledge_extraction:
+      train_bs: 32
+      val_bs: 32
+      test_bs: 32
+      datasets:
+        knowledge_extraction: current_gk
+        
+      collator_conf:
+        inp_prefix: '|knowledge_extraction|:'
+        out_prefix: null
+
+        inp_padding_side: right
+        out_padding_side: right
+
+        inp_truncation_side: right
+        out_truncation_side: right
+
+        inp_max_len: 64
+        out_max_len: 32
+
+        inp_padding: true
+        out_padding: true
+
+        inp_truncation: true
+        out_truncation: true
+
+        inp_add_special_tokens: true
+        out_add_special_tokens: false
+
+        return_tensors: pt
+
+        knowledge_separator: '[GK]'

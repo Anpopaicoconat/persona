@@ -1,15 +1,15 @@
 from typing import *
 import os
-
+from pytorch_lightning.cli import LightningCLI
 import pytorch_lightning as pl
 
-from clearml import Task
+# from clearml import Task
 import pandas as pd
 
 from model import MultitaskModel
 
 
-class MultiTaskLightningCLI(pl.cli.LightningCLI):
+class MultiTaskLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         # Program-level
         parser.add_argument("--project_name", type=str, default="Semantic Search")
@@ -70,18 +70,21 @@ def main():
         MultitaskModel, save_config_kwargs={"overwrite": True}, run=False
     )
 
-    if cli.config["log_to_clearml"] and cli.trainer.local_rank == 0:
-        clearml_task = cli.activate_clearml(cli.config, task_type="training")
-        cli.config["task_id"] = clearml_task.id
-        config_dict = dict(cli.config)
-        config_dict = {k.replace(".", "/"): config_dict[k] for k in config_dict}
-        clearml_task.set_parameters(config_dict)
+    # if cli.config["log_to_clearml"] and cli.trainer.local_rank == 0:
+    #     clearml_task = cli.activate_clearml(cli.config, task_type="training")
+    #     cli.config["task_id"] = clearml_task.id
+    #     config_dict = dict(cli.config)
+    #     config_dict = {k.replace(".", "/"): config_dict[k] for k in config_dict}
+    #     clearml_task.set_parameters(config_dict)
 
-    cli.trainer.fit(
-        model=cli.model,
-        datamodule=cli.model.data_module,
-        ckpt_path=cli.config["ckpt_path"],
-    )
+    # cli.trainer.fit(
+    #     model=cli.model,
+    #     datamodule=cli.model.data_module,
+    #     ckpt_path=cli.config["ckpt_path"],
+    # )
+    for batch in cli.model.data_module.train_dataloader():
+        print(batch)
+        0 / 0
 
 
 if __name__ == "__main__":
