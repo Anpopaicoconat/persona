@@ -95,7 +95,7 @@ model:
     
     #
     knowledge_extraction:
-      train_bs: 32
+      train_bs: 2
       val_bs: 32
       test_bs: 32
       datasets:

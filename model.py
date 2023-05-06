@@ -7,7 +7,7 @@ import transformers
 import pandas as pd
 import numpy as np
 import os
-from data_module import MultiDataModule
+from data import MultiDataModule
 from utils import *
 
 import requests
@@ -103,7 +103,6 @@ class MultitaskModel(pl.LightningModule):
         return loss, pred, target
 
     def forward(self, batch, meta):
-
         if meta["forward_type"] == "seq2seq":
             loss, pred, target = self.seq2seq(batch, meta)
 

@@ -73,8 +73,8 @@ trainer:
   inference_mode: true
 model:
   seed: 42
-  model_name_or_path: S:\models\pretrained\cointegrated\rut5-small
-  data_dir: 'data\processed'
+  model_name_or_path: cointegrated/rut5-small
+  data_dir: 'data/processed'
   spec_tokens_dict:
     prefixes:
       knowledge_extraction: '|knowledge_extraction|:'
@@ -91,7 +91,7 @@ project_name: Persona Chat
 experiment_name: rut5-small
 clearml_tags: 
 - rut5-small
-log_to_clearml: true
+log_to_clearml: false
 clearml_api_host: http://nid-nlu-u20-clearml.ad.speechpro.com:8008
 clearml_web_host: http://nid-nlu-u20-clearml.ad.speechpro.com:8080
 clearml_files_host: http://nid-nlu-u20-clearml.ad.speechpro.com:8081

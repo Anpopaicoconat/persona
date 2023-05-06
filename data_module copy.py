@@ -37,6 +37,7 @@ class MultiDataModule(pl.LightningDataModule):
         self.skip_val_batches = 0
         self.epoch_samples_dropped = 0
         self.tokenizer = tokenizer
+        self.data_dir = data_dir
 
         self.tokenizer.add_special_tokens(
             {
@@ -56,7 +57,10 @@ class MultiDataModule(pl.LightningDataModule):
                     {
                         "task_name": task.task_name,
                         "ds_name": dataset_name,
-                        "path": task.datasets[dataset_name],
+                        "dataset": datasets.load_from_disk(
+                            os.path.join(self.data_dir, task.datasets[dataset_name])
+                        ),
+                        "bs":{"train":task.train_bs}
                     }
                 )
 
@@ -69,29 +73,38 @@ class MultiDataModule(pl.LightningDataModule):
             ep = self.trainer.current_epoch
         except:
             ep = 0
-        # shuffle train split
-        datasets = {
-            dataset_name: self.datasets[dataset_name]["train"].shuffle(
-                seed=self.hparams.seed + ep
-            )
-            for dataset_name in self.datasets
-        }
-        # make batch
+        #shuffle train split
         datasets = [
-            datasets[task].map(
-                lambda batch, task: {
-                    task: [self.collator(batch, task)],
-                    "task": [task],
+            {
+                "task_name": ds_dict["task_name"],
+                "ds_name": ds_dict["ds_name"],
+                "dataset": ds_dict["dataset"]["train"].shuffle(
+                    seed=self.hparams.seed + ep
+                ),
+            }
+            for ds_dict in self.datasets
+        ]
+        #make batch
+        datasets = [
+            ds["dataset"].map(
+                lambda batch, task_name, ds_name: {
+                    batch: self.multi_collator(task_name, ds_name, batch)
                 },
                 batched=True,
                 batch_size=self.hparams.train_batch_size,
-                remove_columns=datasets[task].column_names,
-                fn_kwargs={"task": task},
-                drop_last_batch=True,
+                remove_columns=ds.column_names,
+                fn_kwargs={"task": ds["task_name"], "ds_name": ds["ds_name"]},
+                drop_last_batch=False,
                 num_proc=1,
             )
-            for task in datasets
+            for ds in self.datasets
         ]
+        datasets = []
+        ds_num_batch = []
+        for ds in self.datasets:
+
+
+        
         ds_num_batch = [len(ds) for ds in datasets]
         ds_prob = [size / sum(ds_num_batch) for size in ds_num_batch]
         train_dataloader = datasets.interleave_datasets(datasets, probabilities=ds_prob)

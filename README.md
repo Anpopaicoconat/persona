@@ -12,3 +12,6 @@
 5) retrieve answer by context
    - task5q '|RetrieveAnswer-Q|:'
    - task5c '|RetrieveAnswer-C|:'
+
+python3 main.py --config configs/t5.yml --config configs/tasks.yml
+python3 test_main.py --config configs/t5.yml --config configs/tasks.yml
