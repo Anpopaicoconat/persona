@@ -83,8 +83,8 @@ def main():
     #     ckpt_path=cli.config["ckpt_path"],
     # )
     for batch in cli.model.data_module.train_dataloader():
-        inp = cli.model.tokenizer.batch_decode(batch["batch"]["inp"][0]["input_ids"])
-        out = cli.model.tokenizer.batch_decode(batch["batch"]["out"][0]["input_ids"])
+        inp = cli.model.tokenizer.batch_decode(batch["batch"]["inp"]["input_ids"])
+        out = cli.model.tokenizer.batch_decode(batch["batch"]["out"]["input_ids"])
         for i, o in zip(inp, out):
             print(i)
             print(o)
