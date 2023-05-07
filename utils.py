@@ -395,6 +395,8 @@ class KnowledgeRetrievalCollator(BaseCollator):
         candidate_add_special_tokens: bool = True,
         speakers_seps: Any = [],
         candidate_separator: Any = "",
+        pos_num: int = -1,
+        neg_num: int = -1,
     ) -> None:
         super().__init__(
             tokenizer=tokenizer,
@@ -427,19 +429,34 @@ class KnowledgeRetrievalCollator(BaseCollator):
         self.speakers_seps = speakers_seps
         self.candidate_separator = candidate_separator
         self.outputs = outputs
+        self.pos_num = pos_num
+        self.neg_num = neg_num
 
     def __call__(self, batch) -> List:
-        query_new = []
-        candidate_new = []
-        for i in batch["turn"]:
-            for k in batch["gk"]:
-                query_new.append(i)
-                candidate_new.append(k)
-        batch["turn"] = query_new
-        batch["gk"] = candidate_new
+        query = batch.get("turn", None)
+        candidate = batch.get("gk", None)
+
+        # negative sampling
+        if query is not None and candidate is not None:
+            pos_query = []
+            pos_candidate = []
+            neg_query = []
+            neg_candidate = []
+            for qi, q in enumerate(query):
+                for ci, c in enumerate(candidate):
+                    if qi == ci:
+                        if len(pos_query) < self.pos_num or self.pos_num == -1:
+                            pos_query.append(q)
+                            pos_candidate.append(c)
+                    else:
+                        if len(neg_query) < self.neg_num or self.neg_num == -1:
+                            neg_query.append(q)
+                            neg_candidate.append(c)
+
+            query = pos_query + neg_query
+            candidate = pos_candidate + neg_candidate
 
         # history
-        query = batch.get("turn", None)
         if query is not None:
             query = [sample["text"] for sample in query]
             query = self.tokenize(
@@ -455,7 +472,6 @@ class KnowledgeRetrievalCollator(BaseCollator):
             batch.pop("turn")
 
         # gks
-        candidate = batch.get("gk", None)
         if candidate is not None:
             # 1 random gk for sample in ep
             candidate = [
@@ -473,14 +489,14 @@ class KnowledgeRetrievalCollator(BaseCollator):
                 truncation_side=self.candidate_truncation_side,
             )
             batch.pop("gk")
-
         inp = {k: torch.concat([query[k], candidate[k]], dim=1) for k in query}
         batch["inp"] = inp
 
-        labels = torch.eye(candidate["input_ids"].size()[0])
-        out = [
-            self.outputs[1] if label else self.outputs[0] for label in labels.flatten()
-        ]
+        # out
+        labels = labeling(
+            query["input_ids"], candidate["input_ids"], self.tokenizer.pad_token_id
+        )
+        out = [self.outputs[1] if label else self.outputs[0] for label in labels]
         batch["out"] = self.tokenize(
             prefix=self.out_prefix,
             text=out,
@@ -493,3 +509,30 @@ class KnowledgeRetrievalCollator(BaseCollator):
         )
 
         return batch
+
+
+def labeling(q, c, pad_token_id):
+    # приводим запросы и кандидаты к одинаковой длинне для их сравнения
+    c_pad = q.size()[-1] - c.size()[-1]
+    if c_pad > 0:
+        c = torch.nn.functional.pad(c, (0, c_pad), mode="constant", value=pad_token_id)
+    q_pad = c.size()[-1] - q.size()[-1]
+    if q_pad > 0:
+        q = torch.nn.functional.pad(q, (0, q_pad), mode="constant", value=pad_token_id)
+    # выставляем 1 для всех одинаковых кандидатов для каждого запроса
+    labels_q1 = torch.all(c[:, None, :] == c, dim=-1)
+    # выставляем 1 для всех кандидатов одинаковых запросу
+    labels_q2 = torch.all(c[:, None, :] == q, dim=-1)
+    # объединяем первые 2 матрицы
+    labels_q = torch.logical_or(labels_q1, labels_q2)
+    # аналогично первым 3 операциям, но наоборот
+    labels_c1 = torch.all(q[:, None, :] == q, dim=-1)
+    labels_c2 = torch.all(q[:, None, :] == c, dim=-1)
+    labels_c = torch.logical_or(labels_c1, labels_c2).transpose(1, 0)
+    # ищем одинаковых кандидатов
+    mask = labels_q[:, :, None]
+    # для одинаковых кандидатов объединяем 1 для всех их запросов
+    masked = labels_c * mask
+    # если хотя бы 1 из одинаковых кандидатов подходил запрос он будет подходить всем
+    labels = torch.any(masked, dim=1).flatten().tolist()
+    return labels
