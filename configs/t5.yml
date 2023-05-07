@@ -73,7 +73,7 @@ trainer:
   inference_mode: true
 model:
   seed: 42
-  model_name_or_path: /mnt/cs/nlu/models/pretrained/cointegrated/rut5-small/
+  model_name_or_path: cointegrated/rut5-small
   data_dir: 'data/processed'
   spec_tokens_dict:
     prefixes:

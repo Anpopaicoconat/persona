@@ -28,17 +28,17 @@ class TaskConfig:
                 tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
             )
         elif task_name in ["knowledge_retrieval"]:
-            self.collator = KnowledgeExtractionCollator(
+            self.collator = KnowledgeRetrievalCollator(
                 tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
             )
         elif task_name in ["knowledge_extraction"]:
             self.collator = KnowledgeExtractionCollator(
                 tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
             )
-        elif task_name in ["answer_confirmation"]:
-            self.collator = KnowledgeExtractionCollator(
-                tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
-            )
+        # elif task_name in ["answer_confirmation"]:
+        #     self.collator = KnowledgeExtractionCollator(
+        #         tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
+        #     )
 
         self.datasets = datasets
 
@@ -365,176 +365,131 @@ class KnowledgeGrounGenerationCollator(BaseCollator):
         return batch
 
 
-class Seq2SeqCrossEncoder_Collator(Seq2Seq_Collator):
+class KnowledgeRetrievalCollator(BaseCollator):
     def __init__(
         self,
         tokenizer,
-        scores,
+        outputs,
         spec_tokens_dict: dict,
-        inp_prefix: str,
+        query_prefix: str,
         out_prefix: str = None,
-        inp_padding_side: Literal["left", "right"] = "right",
+        query_padding_side: Literal["left", "right"] = "right",
         out_padding_side: Literal["left", "right"] = "right",
-        inp_truncation_side: Literal["left", "right"] = "right",
+        query_truncation_side: Literal["left", "right"] = "right",
         out_truncation_side: Literal["left", "right"] = "right",
-        inp_max_len: int = 64,
+        query_max_len: int = 64,
         out_max_len: int = 64,
-        inp_padding: Literal["max_length", True] = True,
+        query_padding: Literal["max_length", True] = True,
         out_padding: Literal["max_length", True] = True,
-        inp_truncation: bool = True,
+        query_truncation: bool = True,
         out_truncation: bool = True,
-        inp_add_special_tokens: bool = True,
+        query_add_special_tokens: bool = True,
         out_add_special_tokens: bool = True,
         return_tensors: Literal["pt"] = "pt",
-        num_turns: int = -1,
-        knowledge_prefix: int = 64,
-        knowledge_padding_side: Literal["left", "right"] = "right",
-        knowledge_truncation_side: Literal["left", "right"] = "right",
-        knowledge_max_len: int = 64,
-        knowledge_padding: Literal["max_length", True] = True,
-        knowledge_truncation: bool = True,
-        knowledge_add_special_tokens: bool = True,
+        candidate_prefix: int = 64,
+        candidate_padding_side: Literal["left", "right"] = "right",
+        candidate_truncation_side: Literal["left", "right"] = "right",
+        candidate_max_len: int = 64,
+        candidate_padding: Literal["max_length", True] = True,
+        candidate_truncation: bool = True,
+        candidate_add_special_tokens: bool = True,
+        speakers_seps: Any = [],
+        candidate_separator: Any = "",
     ) -> None:
         super().__init__(
-            tokenizer,
-            spec_tokens_dict,
-            inp_prefix,
-            out_prefix,
-            inp_padding_side,
-            out_padding_side,
-            inp_truncation_side,
-            out_truncation_side,
-            inp_max_len,
-            out_max_len,
-            inp_padding,
-            out_padding,
-            inp_truncation,
-            out_truncation,
-            inp_add_special_tokens,
-            out_add_special_tokens,
-            return_tensors,
-            num_turns,
+            tokenizer=tokenizer,
+            spec_tokens_dict=spec_tokens_dict,
+            return_tensors=return_tensors,
         )
-        self.knowledge_prefix = knowledge_prefix
-        self.knowledge_padding_side = knowledge_padding_side
-        self.knowledge_truncation_side = knowledge_truncation_side
-        self.knowledge_max_len = knowledge_max_len
-        self.knowledge_padding = knowledge_padding
-        self.knowledge_truncation = knowledge_truncation
-        self.knowledge_add_special_tokens = knowledge_add_special_tokens
-        self.scores = scores
+        self.query_prefix = query_prefix
+        self.out_prefix = out_prefix
+        self.query_padding_side = query_padding_side
+        self.out_padding_side = out_padding_side
+        self.query_truncation_side = query_truncation_side
+        self.out_truncation_side = out_truncation_side
+        self.query_max_len = query_max_len
+        self.out_max_len = out_max_len
+        self.query_padding = query_padding
+        self.out_padding = out_padding
+        self.query_truncation = query_truncation
+        self.out_truncation = out_truncation
+        self.query_add_special_tokens = query_add_special_tokens
+        self.out_add_special_tokens = out_add_special_tokens
+
+        self.candidate_prefix = candidate_prefix
+        self.candidate_padding_side = candidate_padding_side
+        self.candidate_truncation_side = candidate_truncation_side
+        self.candidate_max_len = candidate_max_len
+        self.candidate_padding = candidate_padding
+        self.candidate_truncation = candidate_truncation
+        self.candidate_add_special_tokens = candidate_add_special_tokens
+
+        self.speakers_seps = speakers_seps
+        self.candidate_separator = candidate_separator
+        self.outputs = outputs
 
     def __call__(self, batch) -> List:
-        batch["inp"] = batch["history"]
-        bs = len(batch["history"])
-        del batch["history"]
-        # negative sampling
-        inp_new = []
-        knowledge_new = []
-        for i in batch["inp"]:
-            for k in batch["knowledge"]:
-                inp_new.append(i)
-                knowledge_new.append(k)
-        batch["inp"] = inp_new
-        batch["knowledge"] = knowledge_new
-        # query
-        return_dict = super().__call__(batch)
-        # knowledge
-        # compile text
-        knowledge = [k["text"] for k in batch["knowledge"]]
-        # change tokenizer configs for task
-        self.tokenizer.padding_side = self.knowledge_padding_side
-        self.tokenizer.truncation_side = self.knowledge_truncation_side
-        # tokenize
-        knowledge = self.tokenizer(
-            knowledge,
-            max_length=self.knowledge_max_len,
-            padding=self.knowledge_padding,
-            truncation=self.knowledge_truncation,
-            return_tensors=self.return_tensors,
-            add_special_tokens=self.knowledge_add_special_tokens,
-        )
-        # add knowledge prefix
-        prefix = self.knowledge_prefix
-        prefix = self.tokenizer(
-            [prefix],
-            add_special_tokens=False,
-            return_tensors=self.return_tensors,
-        )
-        for k in knowledge:
-            list_to_concat = [
-                prefix[k].repeat((knowledge[k].size()[0], 1)),
-                knowledge[k],
-            ]
-            knowledge[k] = torch.concat(
-                list_to_concat,
-                dim=1,
-            )
+        query_new = []
+        candidate_new = []
+        for i in batch["turn"]:
+            for k in batch["gk"]:
+                query_new.append(i)
+                candidate_new.append(k)
+        batch["turn"] = query_new
+        batch["gk"] = candidate_new
 
-        # out
-        q = return_dict["inp"]["input_ids"][::bs]
-        c = knowledge["input_ids"][:bs]
-        # приводим запросы и кандидаты к одинаковой длинне для их сравнения
-        c_pad = q.size()[-1] - c.size()[-1]
-        if c_pad > 0:
-            c = torch.nn.functional.pad(
-                c, (0, c_pad), mode="constant", value=self.tokenizer.pad_token_id
+        # history
+        query = batch.get("turn", None)
+        if query is not None:
+            query = [sample["text"] for sample in query]
+            query = self.tokenize(
+                prefix=self.query_prefix,
+                text=query,
+                add_special_tokens=self.query_add_special_tokens,
+                padding=self.query_padding,
+                truncation=self.query_truncation,
+                max_length=self.query_max_len,
+                padding_side=self.query_padding_side,
+                truncation_side=self.query_truncation_side,
             )
-        q_pad = c.size()[-1] - q.size()[-1]
-        if q_pad > 0:
-            q = torch.nn.functional.pad(
-                q, (0, q_pad), mode="constant", value=self.tokenizer.pad_token_id
+            batch.pop("turn")
+
+        # gks
+        candidate = batch.get("gk", None)
+        if candidate is not None:
+            # 1 random gk for sample in ep
+            candidate = [
+                self.candidate_separator + " " + random.choice(sample)
+                for sample in candidate
+            ]
+            candidate = self.tokenize(
+                prefix=self.candidate_prefix,
+                text=candidate,
+                add_special_tokens=self.candidate_add_special_tokens,
+                padding=self.candidate_padding,
+                truncation=self.candidate_truncation,
+                max_length=self.candidate_max_len,
+                padding_side=self.candidate_padding_side,
+                truncation_side=self.candidate_truncation_side,
             )
-        # выставляем 1 для всех одинаковых кандидатов для каждого запроса
-        labels_q1 = torch.all(c[:, None, :] == c, dim=-1)
-        # выставляем 1 для всех кандидатов одинаковых запросу
-        labels_q2 = torch.all(c[:, None, :] == q, dim=-1)
-        # объединяем первые 2 матрицы
-        labels_q = torch.logical_or(labels_q1, labels_q2)
-        # аналогично первым 3 операциям, но наоборот
-        labels_c1 = torch.all(q[:, None, :] == q, dim=-1)
-        labels_c2 = torch.all(q[:, None, :] == c, dim=-1)
-        labels_c = torch.logical_or(labels_c1, labels_c2).transpose(1, 0)
-        # ищем одинаковых кандидатов
-        mask = labels_q[:, :, None]
-        # для одинаковых кандидатов объединяем 1 для всех их запросов
-        masked = labels_c * mask
-        # если хотя бы 1 из одинаковых кандидатов подходил запрос он будет подходить всем
-        labels = torch.any(masked, dim=1).flatten().tolist()
-        out = [self.scores[1] if label else self.scores[0] for label in labels]
-        # change tokenizer configs for task
-        self.tokenizer.padding_side = self.out_padding_side
-        self.tokenizer.truncation_side = self.out_truncation_side
-        # tokenize
-        out = self.tokenizer(
-            out,
-            max_length=self.out_max_len,
+            batch.pop("gk")
+
+        inp = {k: torch.concat([query[k], candidate[k]], dim=1) for k in query}
+        batch["inp"] = inp
+
+        labels = torch.eye(candidate["input_ids"].size()[0])
+        out = [
+            self.outputs[1] if label else self.outputs[0] for label in labels.flatten()
+        ]
+        batch["out"] = self.tokenize(
+            prefix=self.out_prefix,
+            text=out,
+            add_special_tokens=self.out_add_special_tokens,
             padding=self.out_padding,
             truncation=self.out_truncation,
-            return_tensors=self.return_tensors,
-            add_special_tokens=self.out_add_special_tokens,
+            max_length=self.out_max_len,
+            padding_side=self.out_padding_side,
+            truncation_side=self.out_truncation_side,
         )
-        return_dict["out"] = out
-        #####################
-        new_inp = {}
-        for k in return_dict["inp"]:
-            new_inp[k] = torch.concat([return_dict["inp"][k], knowledge[k]], dim=1)
-        return_dict["inp"] = new_inp
 
-        return return_dict
-
-    def label_decode(self, out_batch):
-        out_batch = self.tokenizer.batch_decode(out_batch)
-        classes_batch = []
-        for c in out_batch:
-            c = (
-                c.lower()
-                .replace(self.tokenizer.pad_token, "")
-                .replace(self.tokenizer.eos_token, "")
-                .strip()
-            )
-            try:
-                classes_batch.append(self.scores.index(c))
-            except ValueError:
-                classes_batch.append(0)
-        return torch.tensor(classes_batch)
+        return batch
