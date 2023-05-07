@@ -82,13 +82,22 @@ def main():
     #     datamodule=cli.model.data_module,
     #     ckpt_path=cli.config["ckpt_path"],
     # )
+    c = 0
     for batch in cli.model.data_module.train_dataloader():
-        inp = cli.model.tokenizer.batch_decode(batch["batch"]["inp"]["input_ids"])
-        out = cli.model.tokenizer.batch_decode(batch["batch"]["out"]["input_ids"])
+        task, ds_name = batch["type"]["task"], batch["type"]["source"]
+        batch = batch[task]
+        print("-------------------")
+        print(task, ds_name)
+        print(batch)
+        inp = cli.model.tokenizer.batch_decode(batch["inp"]["input_ids"])
+        out = cli.model.tokenizer.batch_decode(batch["out"]["input_ids"])
         for i, o in zip(inp, out):
             print(i)
             print(o)
             print()
+        c += 1
+        if c > 100:
+            0 / 0
 
 
 if __name__ == "__main__":

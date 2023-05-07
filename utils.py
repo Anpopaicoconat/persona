@@ -131,7 +131,7 @@ class MultiCollator:
 
     def __call__(self, task_name, ds_name, batch) -> Dict:
         return {
-            "batch": [self.collators_dict[task_name](dict(batch))],
+            task_name: [self.collators_dict[task_name](dict(batch))],
             "type": [
                 {
                     "task": task_name,
@@ -188,18 +188,16 @@ class KnowledgeExtractionCollator(BaseCollator):
         inp = batch.get("turn", None)
         if inp is not None:
             inp = [sample["text"] for sample in inp]
-            batch["inp"] = [
-                self.tokenize(
-                    prefix=self.inp_prefix,
-                    text=inp,
-                    add_special_tokens=self.inp_add_special_tokens,
-                    padding=self.inp_padding,
-                    truncation=self.inp_truncation,
-                    max_length=self.inp_max_len,
-                    padding_side=self.inp_padding_side,
-                    truncation_side=self.inp_truncation_side,
-                )
-            ]
+            batch["inp"] = self.tokenize(
+                prefix=self.inp_prefix,
+                text=inp,
+                add_special_tokens=self.inp_add_special_tokens,
+                padding=self.inp_padding,
+                truncation=self.inp_truncation,
+                max_length=self.inp_max_len,
+                padding_side=self.inp_padding_side,
+                truncation_side=self.inp_truncation_side,
+            )
             batch.pop("turn")
 
         out = batch.get("gk", None)
@@ -208,18 +206,16 @@ class KnowledgeExtractionCollator(BaseCollator):
                 " ".join([self.knowledge_separator + " " + gk for gk in sample])
                 for sample in out
             ]
-            batch["out"] = [
-                self.tokenize(
-                    prefix=self.out_prefix,
-                    text=out,
-                    add_special_tokens=self.out_add_special_tokens,
-                    padding=self.out_padding,
-                    truncation=self.out_truncation,
-                    max_length=self.out_max_len,
-                    padding_side=self.out_padding_side,
-                    truncation_side=self.out_truncation_side,
-                )
-            ]
+            batch["out"] = self.tokenize(
+                prefix=self.out_prefix,
+                text=out,
+                add_special_tokens=self.out_add_special_tokens,
+                padding=self.out_padding,
+                truncation=self.out_truncation,
+                max_length=self.out_max_len,
+                padding_side=self.out_padding_side,
+                truncation_side=self.out_truncation_side,
+            )
             batch.pop("gk")
         return batch
 
@@ -438,23 +434,17 @@ class KnowledgeRetrievalCollator(BaseCollator):
 
         # negative sampling
         if query is not None and candidate is not None:
-            pos_query = []
-            pos_candidate = []
-            neg_query = []
-            neg_candidate = []
+            bs = len(query)
+            query_new = []
+            candidate_new = []
+
             for qi, q in enumerate(query):
                 for ci, c in enumerate(candidate):
-                    if qi == ci:
-                        if len(pos_query) < self.pos_num or self.pos_num == -1:
-                            pos_query.append(q)
-                            pos_candidate.append(c)
-                    else:
-                        if len(neg_query) < self.neg_num or self.neg_num == -1:
-                            neg_query.append(q)
-                            neg_candidate.append(c)
+                    query_new.append(q)
+                    candidate_new.append(c)
 
-            query = pos_query + neg_query
-            candidate = pos_candidate + neg_candidate
+            query = query_new
+            candidate = candidate_new
 
         # history
         if query is not None:
@@ -490,14 +480,13 @@ class KnowledgeRetrievalCollator(BaseCollator):
             )
             batch.pop("gk")
         inp = {k: torch.concat([query[k], candidate[k]], dim=1) for k in query}
-        batch["inp"] = inp
-
         # out
-        labels = labeling(
-            query["input_ids"], candidate["input_ids"], self.tokenizer.pad_token_id
-        )
+        ids = [i * bs + i for i in range(bs)]
+        q = torch.index_select(query["input_ids"], dim=0, index=torch.tensor(ids))
+        c = candidate["input_ids"][:bs]
+        labels = labeling(q, c, self.tokenizer.pad_token_id)
         out = [self.outputs[1] if label else self.outputs[0] for label in labels]
-        batch["out"] = self.tokenize(
+        out = self.tokenize(
             prefix=self.out_prefix,
             text=out,
             add_special_tokens=self.out_add_special_tokens,
@@ -507,6 +496,21 @@ class KnowledgeRetrievalCollator(BaseCollator):
             padding_side=self.out_padding_side,
             truncation_side=self.out_truncation_side,
         )
+
+        # chose samples
+        if self.pos_num == -1:
+            pos_num = torch.sum(labels == 1)
+        else:
+            pos_num = self.pos_num
+        if self.neg_num == -1:
+            neg_num = torch.sum(torch.logical_not(labels))
+        else:
+            neg_num = self.neg_num
+        pos_ids = random.sample(labels.nonzero().tolist(), k=pos_num)
+        neg_ids = random.sample(torch.logical_not(labels).nonzero().tolist(), k=neg_num)
+        ids = torch.tensor(pos_ids + neg_ids).flatten()
+        batch["inp"] = {k: torch.index_select(inp[k], dim=0, index=ids) for k in inp}
+        batch["out"] = {k: torch.index_select(out[k], dim=0, index=ids) for k in out}
 
         return batch
 
@@ -534,5 +538,5 @@ def labeling(q, c, pad_token_id):
     # для одинаковых кандидатов объединяем 1 для всех их запросов
     masked = labels_c * mask
     # если хотя бы 1 из одинаковых кандидатов подходил запрос он будет подходить всем
-    labels = torch.any(masked, dim=1).flatten().tolist()
+    labels = torch.any(masked, dim=1).flatten()
     return labels

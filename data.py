@@ -87,7 +87,8 @@ class MultiDataModule(pl.LightningDataModule):
             dataset_list.append(ds)
             ds_prob.append(len(ds))
         ds_prob = [l / sum(ds_prob) for l in ds_prob]
+        ds_prob = [1 / len(dataset_list) for _ in dataset_list]
         train_dataloader = datasets.interleave_datasets(
             dataset_list, probabilities=ds_prob
         )
-        return ds  # train_dataloader.with_format("pytorch")
+        return train_dataloader.with_format("pytorch")
