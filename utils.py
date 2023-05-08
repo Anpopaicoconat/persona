@@ -24,7 +24,7 @@ class TaskConfig:
         self.val_bs = val_bs
         self.test_bs = test_bs
         if task_name in ["knowledge_ground_generation"]:
-            self.collator = KnowledgeGrounGenerationCollator(
+            self.collator = KnowledgeGroundGenerationCollator(
                 tokenizer=tokenizer, spec_tokens_dict=spec_tokens_dict, **collator_conf
             )
         elif task_name in ["knowledge_retrieval"]:
@@ -124,6 +124,11 @@ class BaseCollator:
             )
         return text
 
+    def label_decode(self, batch) -> List[str]:
+        batch = batch
+        # TODO: single decode?
+        return self.tokenizer.batch_decode(batch)
+
 
 class MultiCollator:
     def __init__(self, collators_dict):
@@ -134,11 +139,14 @@ class MultiCollator:
             task_name: [self.collators_dict[task_name](dict(batch))],
             "type": [
                 {
-                    "task": task_name,
-                    "source": ds_name,
+                    "task_name": task_name,
+                    "ds_name": ds_name,
                 }
             ],
         }
+
+    def label_decode(self, task_name, ds_name, batch) -> List[str]:
+        return self.collators_dict[task_name].label_decode(batch[1:])
 
 
 class KnowledgeExtractionCollator(BaseCollator):
@@ -220,7 +228,7 @@ class KnowledgeExtractionCollator(BaseCollator):
         return batch
 
 
-class KnowledgeGrounGenerationCollator(BaseCollator):
+class KnowledgeGroundGenerationCollator(BaseCollator):
     def __init__(
         self,
         tokenizer,
@@ -499,13 +507,15 @@ class KnowledgeRetrievalCollator(BaseCollator):
 
         # chose samples
         if self.pos_num == -1:
-            pos_num = torch.sum(labels == 1)
+            pos_num = torch.sum(labels)
         else:
-            pos_num = self.pos_num
+            pos_num = min(torch.sum(labels), self.pos_num)
+
         if self.neg_num == -1:
             neg_num = torch.sum(torch.logical_not(labels))
         else:
-            neg_num = self.neg_num
+            neg_num = min(torch.sum(torch.logical_not(labels)), self.neg_num)
+
         pos_ids = random.sample(labels.nonzero().tolist(), k=pos_num)
         neg_ids = random.sample(torch.logical_not(labels).nonzero().tolist(), k=neg_num)
         ids = torch.tensor(pos_ids + neg_ids).flatten()
@@ -513,6 +523,16 @@ class KnowledgeRetrievalCollator(BaseCollator):
         batch["out"] = {k: torch.index_select(out[k], dim=0, index=ids) for k in out}
 
         return batch
+
+    def label_decode(self, batch):
+        batch = super().label_decode(batch)
+        out = []
+        for i in batch:
+            try:
+                out.append(self.outputs.index(i))
+            except ValueError:
+                out.append(0)
+        return torch.tensor(out)
 
 
 def labeling(q, c, pad_token_id):

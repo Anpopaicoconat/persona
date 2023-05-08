@@ -82,7 +82,7 @@ class MultiDataModule(pl.LightningDataModule):
                 },
                 drop_last_batch=False,
                 num_proc=1,
-                load_from_cache_file=False,
+                load_from_cache_file=True,
             )
             dataset_list.append(ds)
             ds_prob.append(len(ds))

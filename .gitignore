@@ -7,3 +7,4 @@ test.py
 data/processed/current_gk
 data/processed/next_answer
 data/processed/next_gk
+outdir

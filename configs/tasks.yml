@@ -3,49 +3,49 @@
 model:
   tasks:
   #
-    knowledge_ground_generation:
-      train_bs: 32
-      val_bs: 32
-      test_bs: 32
-      datasets:
-        next_answer: next_answer
+    # knowledge_ground_generation:
+    #   train_bs: 32
+    #   val_bs: 32
+    #   test_bs: 32
+    #   datasets:
+    #     next_answer: next_answer
         
-      collator_conf:
-        inp_prefix: 'dialog: '
-        knowledge_prefix: 'knowledge: '
-        out_prefix: null
+    #   collator_conf:
+    #     inp_prefix: 'dialog: '
+    #     knowledge_prefix: 'knowledge: '
+    #     out_prefix: null
 
-        inp_padding_side: right
-        knowledge_padding_side: right
-        out_padding_side: right
+    #     inp_padding_side: right
+    #     knowledge_padding_side: right
+    #     out_padding_side: right
 
-        inp_truncation_side: left
-        knowledge_truncation_side: right
-        out_truncation_side: right
+    #     inp_truncation_side: left
+    #     knowledge_truncation_side: right
+    #     out_truncation_side: right
 
-        inp_max_len: 64
-        knowledge_max_len: 64
-        out_max_len: 32
+    #     inp_max_len: 64
+    #     knowledge_max_len: 64
+    #     out_max_len: 32
 
-        inp_padding: true
-        knowledge_padding: true
-        out_padding: true
+    #     inp_padding: true
+    #     knowledge_padding: true
+    #     out_padding: true
 
-        inp_truncation: true
-        knowledge_truncation: true
-        out_truncation: true
+    #     inp_truncation: true
+    #     knowledge_truncation: true
+    #     out_truncation: true
 
-        inp_add_special_tokens: true
-        knowledge_add_special_tokens: true
-        out_add_special_tokens: false
+    #     inp_add_special_tokens: true
+    #     knowledge_add_special_tokens: true
+    #     out_add_special_tokens: false
 
-        return_tensors: pt
-        num_turns: -1
+    #     return_tensors: pt
+    #     num_turns: -1
 
-        turn_separator: '[turn-sep]'
-        speakers_seps: 
-          - '|speakerA|: '
-          - '|speakerB|: '
+    #     turn_separator: '[turn-sep]'
+    #     speakers_seps: 
+    #       - '|speakerA|: '
+    #       - '|speakerB|: '
     
     # #
     knowledge_retrieval:
@@ -94,39 +94,39 @@ model:
           - '|speakerA|: '
           - '|speakerB|: '
         candidate_separator: '[GK]'
-        neg_num: -1
-        pos_num: -1
+        neg_num: 32
+        pos_num: 32
     
     #
-    knowledge_extraction:
-      train_bs: 32
-      val_bs: 32
-      test_bs: 32
-      datasets:
-        knowledge_extraction: current_gk
+    # knowledge_extraction:
+    #   train_bs: 32
+    #   val_bs: 32
+    #   test_bs: 32
+    #   datasets:
+    #     current_gk: current_gk
         
-      collator_conf:
-        inp_prefix: '|knowledge_extraction|:'
-        out_prefix: null
+    #   collator_conf:
+    #     inp_prefix: '|knowledge_extraction|:'
+    #     out_prefix: null
 
-        inp_padding_side: right
-        out_padding_side: right
+    #     inp_padding_side: right
+    #     out_padding_side: right
 
-        inp_truncation_side: right
-        out_truncation_side: right
+    #     inp_truncation_side: right
+    #     out_truncation_side: right
 
-        inp_max_len: 64
-        out_max_len: 32
+    #     inp_max_len: 64
+    #     out_max_len: 32
 
-        inp_padding: true
-        out_padding: true
+    #     inp_padding: true
+    #     out_padding: true
 
-        inp_truncation: true
-        out_truncation: true
+    #     inp_truncation: true
+    #     out_truncation: true
 
-        inp_add_special_tokens: true
-        out_add_special_tokens: false
+    #     inp_add_special_tokens: true
+    #     out_add_special_tokens: false
 
-        return_tensors: pt
+    #     return_tensors: pt
 
-        knowledge_separator: '[GK]'
+    #     knowledge_separator: '[GK]'
